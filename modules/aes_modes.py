@@ -55,12 +55,17 @@ class Block:
     - ECB: the plaintext block itself
     - CBC: the plaintext block XOR the previous ciphertext block (the IV first)
     - CTR, GCM: the counter block; the ciphertext is plaintext XOR AES(counter)
+
+    *keystream* (CTR, GCM only) is the part of AES(counter) that was XORed into
+    the plaintext: as many bytes as the block has, so a short last block uses
+    only the start of it.
     """
 
     index: int
     plaintext: bytes
     aes_input: bytes
     ciphertext: bytes
+    keystream: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -138,9 +143,23 @@ def gcm_counter_block(iv: bytes, block_index: int) -> bytes:
     the tag, so data block i uses IV || (i + 2), where only the last 32 bits
     count (and wrap at 2**32).
     """
+    _check_gcm_iv(iv)
+    return iv + ((block_index + 2) % (1 << 32)).to_bytes(4, "big")
+
+
+def gcm_pre_counter_block(iv: bytes) -> bytes:
+    """
+    Return J0, the pre-counter block of AES-GCM with a 96-bit IV: IV || 1.
+
+    No data block uses it: it masks the tag, Tag = AES(J0) XOR GHASH(ciphertext).
+    """
+    _check_gcm_iv(iv)
+    return iv + (1).to_bytes(4, "big")
+
+
+def _check_gcm_iv(iv: bytes) -> None:
     if len(iv) != GCM_IV_SIZE:
         raise ValueError(f"GCM IV must be {GCM_IV_SIZE} bytes; got {len(iv)}")
-    return iv + ((block_index + 2) % (1 << 32)).to_bytes(4, "big")
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +257,9 @@ def _unpad(data: bytes) -> bytes:
     return unpadder.update(data) + unpadder.finalize()
 
 
+_COUNTER_MODES = (AesMode.CTR, AesMode.GCM)  # encrypt counters into a keystream
+
+
 def _split_blocks(data: bytes) -> list[bytes]:
     """Split *data* into 16-byte blocks; the last one may be shorter."""
     return [data[i : i + BLOCK_SIZE] for i in range(0, len(data), BLOCK_SIZE)]
@@ -308,7 +330,14 @@ def _describe_blocks(
     ct_blocks = _split_blocks(ciphertext)
     aes_inputs = _aes_inputs(mode, pt_blocks, ct_blocks, iv)
     return tuple(
-        Block(index, pt, aes_input, ct)
+        Block(
+            index,
+            pt,
+            aes_input,
+            ct,
+            # C = P XOR keystream, so the keystream is P XOR C.
+            keystream=_xor_bytes(pt, ct) if mode in _COUNTER_MODES else None,
+        )
         for index, (pt, aes_input, ct) in enumerate(
             zip(pt_blocks, aes_inputs, ct_blocks, strict=True)
         )

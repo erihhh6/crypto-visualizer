@@ -6,7 +6,8 @@ Covers:
   - Round trips for every mode and key size
   - Ciphertext shape: IV, tag and padding per mode
   - What each mode reveals: ECB repeats equal blocks, the others do not
-  - Block detail: each block's aes_input reproduces the real ciphertext
+  - Block detail: each block's aes_input and keystream reproduce the real
+    ciphertext, and the GCM tag is GHASH masked with AES(J0)
   - Counter-block arithmetic at overflow (CTR, GCM)
   - Decryption failures: PaddingError (ECB, CBC), AuthenticationError (GCM)
   - Key parsing (hex) and validation, malformed input
@@ -36,6 +37,7 @@ from modules.aes_modes import (
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
     gcm_counter_block,
+    gcm_pre_counter_block,
     key_from_hex,
 )
 
@@ -65,6 +67,33 @@ def _aes_block(key: bytes, block: bytes) -> bytes:
 
 def _flip_first_byte(data: bytes) -> bytes:
     return bytes([data[0] ^ 0x01]) + data[1:]
+
+
+def _xor(a: bytes, b: bytes) -> bytes:
+    return bytes(x ^ y for x, y in zip(a, b, strict=True))
+
+
+def _gf128_multiply(x: int, y: int) -> int:
+    """Multiply in GCM's GF(2^128): SP 800-38D Algorithm 1 (x0 is the top bit)."""
+    r = 0xE1 << 120
+    z, v = 0, y
+    for bit in range(127, -1, -1):
+        if (x >> bit) & 1:
+            z ^= v
+        v = (v >> 1) ^ r if v & 1 else v >> 1
+    return z
+
+
+def _ghash(h: bytes, ciphertext: bytes) -> bytes:
+    """GHASH_H over the ciphertext and the length block, with no associated data."""
+    padded = ciphertext + bytes(-len(ciphertext) % BLOCK_SIZE)
+    lengths = (0).to_bytes(8, "big") + (8 * len(ciphertext)).to_bytes(8, "big")
+    data = padded + lengths
+    y, h_int = 0, int.from_bytes(h, "big")
+    for i in range(0, len(data), BLOCK_SIZE):
+        block = int.from_bytes(data[i : i + BLOCK_SIZE], "big")
+        y = _gf128_multiply(y ^ block, h_int)
+    return y.to_bytes(BLOCK_SIZE, "big")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +225,31 @@ def test_aes_input_reproduces_the_ciphertext(
         assert expected == blk.ciphertext, f"block {blk.index}"
 
 
+@pytest.mark.parametrize("mode", list(AesMode))
+def test_keystream_is_the_used_part_of_aes_of_the_counter(
+    mode: AesMode, key128: bytes, plaintext: bytes
+) -> None:
+    # The fixture's last block is short, so the cut-off keystream is covered.
+    for blk in encrypt(mode, plaintext, key128).blocks:
+        if mode in STREAM_MODES:
+            used = _aes_block(key128, blk.aes_input)[: len(blk.plaintext)]
+            assert blk.keystream == used, f"block {blk.index}"
+        else:
+            assert blk.keystream is None
+
+
+def test_gcm_tag_is_ghash_masked_with_aes_of_the_pre_counter_block(
+    key128: bytes, plaintext: bytes
+) -> None:
+    result = encrypt(AesMode.GCM, plaintext, key128)
+    assert result.iv is not None
+
+    hash_key = _aes_block(key128, bytes(BLOCK_SIZE))  # H = AES(0^128)
+    mask = _aes_block(key128, gcm_pre_counter_block(result.iv))
+
+    assert result.tag == _xor(mask, _ghash(hash_key, result.ciphertext))
+
+
 # A random initial counter practically never overflows within one message,
 # so the carry and wrap-around paths are pinned with chosen values.
 @pytest.mark.parametrize(
@@ -222,6 +276,7 @@ def test_ctr_counter_follows_the_cipher_through_overflow(
 
 def test_gcm_counter_starts_at_two_and_wraps_in_32_bits() -> None:
     iv = os.urandom(GCM_IV_SIZE)
+    assert gcm_pre_counter_block(iv) == iv + b"\x00\x00\x00\x01"
     assert gcm_counter_block(iv, 0) == iv + b"\x00\x00\x00\x02"
     assert gcm_counter_block(iv, 2**32 - 2) == iv + b"\x00\x00\x00\x00"
 
@@ -229,6 +284,8 @@ def test_gcm_counter_starts_at_two_and_wraps_in_32_bits() -> None:
 def test_gcm_counter_needs_a_96_bit_iv() -> None:
     with pytest.raises(ValueError, match="GCM IV must be 12 bytes"):
         gcm_counter_block(bytes(16), 0)
+    with pytest.raises(ValueError, match="GCM IV must be 12 bytes"):
+        gcm_pre_counter_block(bytes(16))
 
 
 # ---------------------------------------------------------------------------

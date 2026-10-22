@@ -173,8 +173,19 @@ def test_clicking_a_block_shows_its_details(tab: Any) -> None:
     click_block(block_canvas(tab), 1)
 
     details = _details(tab)
-    assert details.startswith("Block 1 — CBC")
+    assert details.startswith("Block 1 — CBC\nC1 = AES(P1 ⊕ C0)")
     assert _MESSAGE.encode()[16:32].hex().upper() in details
+
+
+def test_encrypting_again_clears_the_block_details(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC)
+    placeholder = _details(tab)
+    click_block(block_canvas(tab), 1)
+    require(_details(tab) != placeholder, "clicking a block showed no details")
+
+    find_button(tab, "Encrypt").invoke()  # new IV: block 1 is different now
+
+    assert _details(tab) == placeholder
 
 
 def test_encrypting_fills_the_comparison_for_every_mode(tab: Any) -> None:
