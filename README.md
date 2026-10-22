@@ -16,7 +16,7 @@
 - **Mode comparison** — one message and key through all four modes; equal 16-byte blocks share a colour, so ECB's repeated blocks stand out, and each mode's length, IV/counter and tag are listed
 - **Tamper Lab** — decrypt with wrong keys (one, or 20,000 to measure the padding check's ~1-in-255 false accepts) and edit a message without the key by XORing its ciphertext: CTR applies the edit exactly, CBC garbles the block before, ECB only garbles, GCM refuses
 - **ECB Penguin Attack** — load any BMP image and see why ECB mode is dangerous (structural patterns survive encryption)
-- **Key Exchange** — Diffie-Hellman (2048-bit, RFC 3526 Group 14) and ECDH (SECP256R1) with step-by-step animation; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
+- **Key Exchange** — Diffie-Hellman (3072-bit RFC 3526 group 15 by default, which matches P-256's 128-bit security, or 2048-bit group 14) and ECDH (SECP256R1) with step-by-step animation, both ending with an AES-256 key derived by HKDF-SHA256; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
 
 ---
@@ -71,6 +71,7 @@ failures) until the commit that fixes them removes the marker.
 | Diffie-Hellman | Public/private value exchange; shared secret via modular exponentiation | RFC 3526 |
 | ECDH | Same idea on an elliptic curve; much smaller keys for same security | RFC 8422 |
 | Key size equivalence | 256-bit ECDH ≈ 3072-bit DH ≈ 128-bit symmetric security | NIST SP 800-57 Table 2 |
+| Key derivation | A shared secret is not a key: HKDF extracts and expands it into one | RFC 5869 |
 
 ---
 
@@ -109,5 +110,6 @@ crypto-visualizer/
 - **NIST SP 800-38D** — GCM Mode: https://csrc.nist.gov/publications/detail/sp/800-38d/final
 - **RFC 3526** — More Modular Exponential (MODP) Diffie-Hellman groups for IKE: https://www.rfc-editor.org/rfc/rfc3526
 - **RFC 8422** — Elliptic Curve Cryptography (ECC) Cipher Suites for TLS: https://www.rfc-editor.org/rfc/rfc8422
+- **RFC 5869** — HMAC-based Extract-and-Expand Key Derivation Function (HKDF): https://www.rfc-editor.org/rfc/rfc5869
 - **NIST SP 800-57** — Recommendation for Key Management: https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final
 - **PyCA cryptography** — https://cryptography.io/en/latest/

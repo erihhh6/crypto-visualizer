@@ -16,7 +16,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
 from gui.palette import ACTOR_COLOURS, VALUE_COLOURS
-from modules.key_exchange import Actor, Point, Visibility
+from modules.key_exchange import Actor, DHGroup, Point, Visibility
 from modules.toy_curve import TOY_CURVE, TOY_GENERATOR, TOY_ORDER, ToyECDH
 
 _BG = "#1E2533"
@@ -142,7 +142,7 @@ class ExchangePlot(ctk.CTkFrame):
         )
         self._mpl_canvas.draw()
 
-    def show_dh_flow(self) -> None:
+    def show_dh_flow(self, group: DHGroup) -> None:
         """Show what Alice and Bob send each other in classical DH."""
         self._title.configure(text="Diffie-Hellman: what crosses the wire")
         ax = self._clear()
@@ -150,7 +150,9 @@ class ExchangePlot(ctk.CTkFrame):
         ax.set_ylim(0, 6)
         ax.set_axis_off()
         ax.set_title(
-            "DH Key Exchange — 2048-bit MODP (RFC 3526)", color="white", fontsize=9
+            f"DH Key Exchange — {group.bits}-bit MODP ({group.name})",
+            color="white",
+            fontsize=9,
         )
 
         for x, name, colour in ((0.5, "Alice", "#2E86AB"), (7.5, "Bob", "#E07B39")):
@@ -179,12 +181,12 @@ class ExchangePlot(ctk.CTkFrame):
             )
             ax.text(5, y_text, text, ha="center", color=colour, fontsize=8)
 
-        ax.text(1.5, 1.5, "shared = B^a mod p", ha="center", color="gray", fontsize=7)
-        ax.text(8.5, 1.5, "shared = A^b mod p", ha="center", color="gray", fontsize=7)
+        ax.text(1.5, 1.5, "s = B^a mod p", ha="center", color="gray", fontsize=7)
+        ax.text(8.5, 1.5, "s = A^b mod p", ha="center", color="gray", fontsize=7)
         ax.text(
             5,
             0.7,
-            "Both arrive at the same shared secret!",
+            "Both arrive at the same s, and HKDF turns it into the AES key K",
             ha="center",
             color="#5BAD72",
             fontsize=9,

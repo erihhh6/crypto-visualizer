@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tkinter as tk
 from typing import Any
 
 import customtkinter as ctk
@@ -148,6 +149,64 @@ def test_dh_shows_the_message_flow_instead_of_the_curve(tab: Any) -> None:
         label_text(w) for w in descendants(_plot(tab)) if isinstance(w, ctk.CTkLabel)
     ]
     assert any("Diffie-Hellman" in title for title in titles)
+
+
+@pytest.mark.parametrize(
+    ("choice", "prime"),
+    [
+        (None, "3072-bit prime (RFC 3526 group 15)"),  # the default: like P-256
+        ("2048-bit", "2048-bit prime (RFC 3526 group 14)"),
+    ],
+)
+def test_the_dh_group_can_be_chosen(tab: Any, choice: str | None, prime: str) -> None:
+    if choice is not None:
+        (menu,) = [w for w in descendants(tab) if isinstance(w, ctk.CTkOptionMenu)]
+        menu.set(choice)
+
+    find_button(tab, "Run DH").invoke()
+
+    first_card = "\n".join(_card_lines(tab)[0])
+    assert prime in first_card
+    title = _plot(tab).figure.axes[0].get_title()
+    assert prime.split()[0] in title  # "3072-bit" or "2048-bit" in the diagram
+
+
+@pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])
+def test_both_protocols_end_with_a_derived_aes_key(tab: Any, protocol: str) -> None:
+    find_button(tab, protocol).invoke()
+
+    last_card = _card_lines(tab)[-1]
+    assert any("HKDF-SHA256" in line for line in last_card)
+    (key_line,) = [line for line in last_card if " K = " in line]
+    assert key_line.startswith("🔒")  # a shared secret: never sent
+
+
+@pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])
+def test_stepping_brings_the_current_card_into_view(tab: Any, protocol: str) -> None:
+    find_button(tab, protocol).invoke()
+    pump(tab)
+    for step in range(6):
+        if step:
+            find_button(tab, "Next").invoke()
+            pump(tab, 100)
+        cards = [w for w in descendants(tab) if isinstance(w, StepCard)]
+        current, viewport = cards[step], cards[step].master.master
+        require(isinstance(viewport, tk.Canvas), "the step list is not in a canvas")
+        top, bottom = (
+            viewport.winfo_rooty(),
+            viewport.winfo_rooty() + viewport.winfo_height(),
+        )
+
+        assert top <= current.winfo_rooty(), f"step {step + 1} starts above the view"
+        assert current.winfo_rooty() + current.winfo_height() <= bottom, (
+            f"step {step + 1} ends below the view"
+        )
+        if viewport.yview()[1] < 1.0:  # the list could scroll further: it should
+            # Tk scrolls in whole increments (30 px on Linux with CustomTkinter 6).
+            slack = int(viewport.winfo_fpixels(viewport.cget("yscrollincrement")))
+            assert current.winfo_rooty() - top <= max(slack, 1), (
+                f"step {step + 1} is not at the top"
+            )
 
 
 def test_comparison_lists_three_security_levels(tab: Any) -> None:

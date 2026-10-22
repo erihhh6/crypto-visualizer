@@ -2,7 +2,7 @@
 Key Exchange tab — step-by-step DH/ECDH animator with a protocol plot.
 
 Layout:
-  Row 0 : control buttons  [DH] [ECDH] [Compare]
+  Row 0 : control buttons  [DH] [group size] [ECDH] [Compare]
   Row 1 : step animator (left) | DH flow or toy-curve plot (gui.exchange_plot)
   Row 2 : DH vs ECDH comparison table
 """
@@ -17,6 +17,8 @@ from gui.exchange_plot import ExchangePlot
 from gui.palette import ACTOR_COLOURS, VALUE_COLOURS
 from modules.key_exchange import (
     EQUIVALENT_KEY_SIZES,
+    MODP_2048,
+    MODP_3072,
     RawValue,
     Step,
     Value,
@@ -145,12 +147,22 @@ class KeyExchangeTab(ctk.CTkFrame):
 
         self._dh_btn = ctk.CTkButton(
             ctrl,
-            text="Run DH (2048-bit)",
+            text="Run DH",
             command=self._run_dh,
-            width=160,
+            width=90,
             fg_color="#2E86AB",
         )
-        self._dh_btn.pack(side="left", padx=(0, 8))
+        self._dh_btn.pack(side="left", padx=(0, 4))
+
+        # 3072-bit first: it matches P-256's 128-bit security.
+        self._dh_groups = {f"{g.bits}-bit": g for g in (MODP_3072, MODP_2048)}
+        self._dh_group_var = tk.StringVar(value=next(iter(self._dh_groups)))
+        ctk.CTkOptionMenu(
+            ctrl,
+            values=list(self._dh_groups),
+            variable=self._dh_group_var,
+            width=100,
+        ).pack(side="left", padx=(0, 12))
 
         self._ecdh_btn = ctk.CTkButton(
             ctrl,
@@ -283,11 +295,12 @@ class KeyExchangeTab(ctk.CTkFrame):
     def _run_dh(self) -> None:
         self._status_var.set("Running DH exchange…")
         self.update_idletasks()
-        self._steps = dh_steps(run_dh())
+        group = self._dh_groups[self._dh_group_var.get()]
+        self._steps = dh_steps(run_dh(group))
         self._current_step = 0
         self._mode = "DH"
         self._render_steps()
-        self._plot.show_dh_flow()
+        self._plot.show_dh_flow(group)
         self._status_var.set(
             f"DH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
         )
@@ -347,15 +360,22 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._update_plot_for_step()
 
     def _scroll_to_current(self) -> None:
-        """Attempt to scroll the step list so the current card is visible."""
-        try:
-            children = self._step_scroll.winfo_children()
-            if children and self._current_step < len(children):
-                total = len(children)
-                fraction = self._current_step / max(total - 1, 1)
-                self._step_scroll._parent_canvas.yview_moveto(fraction)
-        except Exception:
-            pass
+        """Scroll the step list so that the current card starts at the top."""
+        cards = self._step_scroll.winfo_children()
+        if not cards:
+            return
+        # The cards were just created: lay them out (which also updates the
+        # scroll region) before measuring them, or the view stops short.
+        self.update_idletasks()
+        # CustomTkinter offers no public access to the scrollable frame's canvas.
+        canvas = self._step_scroll._parent_canvas
+        top = cards[self._current_step].winfo_y()
+        # Tk rounds the view to whole scroll increments (CustomTkinter uses 30
+        # pixels on Linux): round down, so the card is never cut off at the top.
+        increment = int(canvas.winfo_fpixels(canvas.cget("yscrollincrement")))
+        if increment > 1:
+            top -= top % increment
+        canvas.yview_moveto(top / max(self._step_scroll.winfo_height(), 1))
 
     def _prev_step(self) -> None:
         if self._current_step > 0:
