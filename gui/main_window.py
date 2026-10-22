@@ -9,8 +9,10 @@ lighter-gray content box as the tab content — matching the expected look.
 from __future__ import annotations
 
 import os
+import sys
 
 import customtkinter as ctk
+from PIL import Image, ImageTk
 
 from gui.aes_tab import AESTab
 from gui.key_exchange_tab import KeyExchangeTab
@@ -33,9 +35,23 @@ class MainWindow(ctk.CTk):
         self.geometry("1100x700")
         self.minsize(900, 600)
         self.resizable(True, True)
-        if os.path.exists(_ICON_PATH):
-            self.iconbitmap(_ICON_PATH)
+        self._set_window_icon()
         self._build_ui()
+
+    def _set_window_icon(self) -> None:
+        """Show the app icon using the mechanism each platform's Tk supports."""
+        if not os.path.exists(_ICON_PATH):
+            return
+        if sys.platform == "win32":
+            # Windows Tk reads .ico files natively, and CustomTkinter replaces
+            # the icon with its own unless iconbitmap() has been called.
+            self.iconbitmap(_ICON_PATH)
+        else:
+            # Tk on X11 rejects .ico files ('bitmap "…" not defined') and
+            # crashes start-up, so hand it decoded pixels instead. Keep a
+            # reference: Tk drops the image once Python garbage-collects it.
+            self._icon_image = ImageTk.PhotoImage(Image.open(_ICON_PATH))
+            self.iconphoto(True, self._icon_image)
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)

@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import json
-import sys
-
-import pytest
 
 from tests.gui.helpers import require, run_app_script
 from tests.markers import known_bug
-
-_ON_LINUX = sys.platform.startswith("linux")
 
 _START = """
 from gui.main_window import MainWindow
@@ -19,11 +14,6 @@ app = MainWindow()
 app.update()
 app.destroy()
 """
-
-# Tests that need a running app cannot say anything where it does not start.
-_NEEDS_APP_START = pytest.mark.skipif(
-    _ON_LINUX, reason="the app cannot start on Linux yet (test_the_app_starts)"
-)
 
 _CLOSE_TIMEOUT_S = 10
 _HUNG_EXIT_CODE = 3
@@ -64,17 +54,12 @@ app.destroy()
 """
 
 
-@known_bug(
-    "the window icon is a Windows .ico file, which Tk on Linux rejects at start-up",
-    when=_ON_LINUX,
-)
 def test_the_app_starts() -> None:
     result = run_app_script(_START)
 
     assert result.returncode == 0, f"app failed to start:\n{result.stderr}"
 
 
-@_NEEDS_APP_START
 @known_bug("closing the window leaves the process running (pyplot's hidden Tk root)")
 def test_closing_the_window_ends_the_process() -> None:
     result = run_app_script(_CLOSE_WINDOW)
@@ -88,7 +73,6 @@ def test_closing_the_window_ends_the_process() -> None:
     )
 
 
-@_NEEDS_APP_START
 @known_bug("on a light-mode OS, text on the hard-coded dark cards is near-invisible")
 def test_text_stays_readable_on_a_light_mode_os() -> None:
     result = run_app_script(_LIGHT_OS_CONTRAST)
