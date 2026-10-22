@@ -14,6 +14,20 @@ app.update()
 app.destroy()
 """
 
+_UNEXPECTED_ERROR = """
+from tkinter import messagebox
+messagebox.showerror = lambda title, message: print(f"DIALOG {title}: {message}")
+from gui.main_window import MainWindow
+
+def broken_handler():
+    raise RuntimeError("boom")
+
+app = MainWindow()
+app.after(0, broken_handler)  # escapes from a Tk callback, like a button handler
+app.after(300, app.destroy)
+app.mainloop()
+"""
+
 _CLOSE_TIMEOUT_S = 10
 _HUNG_EXIT_CODE = 3
 
@@ -57,6 +71,18 @@ def test_the_app_starts() -> None:
     result = run_app_script(_START)
 
     assert result.returncode == 0, f"app failed to start:\n{result.stderr}"
+
+
+def test_unexpected_errors_are_shown_and_logged() -> None:
+    result = run_app_script(_UNEXPECTED_ERROR)
+
+    require(result.returncode == 0, f"app crashed:\n{result.stderr}")
+    assert "DIALOG Unexpected error: RuntimeError: boom" in result.stdout
+    # The full traceback is logged. (Python < 3.13 omits source lines for -c
+    # code, so match the frame, not the raise statement.)
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "in broken_handler" in result.stderr
+    assert "RuntimeError: boom" in result.stderr
 
 
 def test_closing_the_window_ends_the_process() -> None:

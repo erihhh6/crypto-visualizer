@@ -9,7 +9,7 @@ Covers:
   - Block detail: each block's aes_input reproduces the real ciphertext
   - Counter-block arithmetic at overflow (CTR, GCM)
   - Decryption failures: PaddingError (ECB, CBC), AuthenticationError (GCM)
-  - Key validation and malformed input
+  - Key parsing (hex) and validation, malformed input
   - encrypt_pixels_ecb / encrypt_pixels_cbc helpers
 """
 
@@ -36,6 +36,7 @@ from modules.aes_modes import (
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
     gcm_counter_block,
+    key_from_hex,
 )
 
 STREAM_MODES = [AesMode.CTR, AesMode.GCM]  # XOR a keystream; no padding
@@ -288,6 +289,25 @@ def test_ctr_cannot_detect_a_wrong_key(key128: bytes, plaintext: bytes) -> None:
 def test_encrypt_rejects_invalid_key_sizes(size: int, plaintext: bytes) -> None:
     with pytest.raises(ValueError, match="Key must be 16, 24, or 32 bytes"):
         encrypt(AesMode.ECB, plaintext, bytes(size))
+
+
+def test_key_from_hex_ignores_whitespace_and_case() -> None:
+    typed = " 00112233 44556677\t8899AaBb ccDDeeFF \n"
+    assert key_from_hex(typed) == bytes.fromhex("00112233445566778899aabbccddeeff")
+
+
+@pytest.mark.parametrize(
+    ("typed", "explanation"),
+    [
+        ("not hex", "hexadecimal"),
+        ("0" * 31, "hexadecimal"),  # an odd digit count is not whole bytes
+        ("00ff", "32, 48 or 64 hex digits"),
+        ("0" * 66, "32, 48 or 64 hex digits"),
+    ],
+)
+def test_key_from_hex_explains_what_is_wrong(typed: str, explanation: str) -> None:
+    with pytest.raises(ValueError, match=explanation):
+        key_from_hex(typed)
 
 
 def test_decrypt_rejects_invalid_key_sizes(key128: bytes, plaintext: bytes) -> None:

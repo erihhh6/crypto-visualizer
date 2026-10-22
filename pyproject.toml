@@ -54,6 +54,8 @@ files = ["main.py", "modules", "gui", "tests"]
 strict = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+# matplotlib's Tk backend (FigureCanvasTkAgg and friends) is unannotated.
+untyped_calls_exclude = ["matplotlib.backends"]
 
 [[tool.mypy.overrides]]
 # CustomTkinter ships neither inline types nor stubs.
@@ -61,8 +63,6 @@ module = ["customtkinter", "customtkinter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Known debt: gui/ does not type-check yet (subclasses of untyped CustomTkinter
-# widgets, untyped matplotlib Tk-backend calls, optional canvas item ids).
-# Delete this override once it does.
+# Every widget subclasses an (untyped, hence Any) CustomTkinter class.
 module = ["gui.*"]
-ignore_errors = true
+disallow_subclassing_any = false

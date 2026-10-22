@@ -26,6 +26,7 @@ from modules.aes_modes import (
     encrypt,
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
+    key_from_hex,
 )
 
 # ---------------------------------------------------------------------------
@@ -201,23 +202,28 @@ class BlockCanvas(ctk.CTkFrame):
         )
 
         # Middle row: what this mode passed through AES (none for ECB)
-        r2 = t2 = t2b = None
+        middle_rects: list[int] = []
+        middle_texts: list[int] = []
         aes_input_label = _AES_INPUT_LABEL.get(self._mode)
         if aes_input_label is not None:
-            r2 = self._rect(x0, y_iv, fill=COLOUR_IV, outline="#3A8F58")
-            t2 = self._surface.create_text(
-                x0 + BLOCK_W // 2,
-                y_iv + 10,
-                text=aes_input_label,
-                font=("Courier New", 8),
-                fill="white",
+            middle_rects.append(self._rect(x0, y_iv, fill=COLOUR_IV, outline="#3A8F58"))
+            middle_texts.append(
+                self._surface.create_text(
+                    x0 + BLOCK_W // 2,
+                    y_iv + 10,
+                    text=aes_input_label,
+                    font=("Courier New", 8),
+                    fill="white",
+                )
             )
-            t2b = self._surface.create_text(
-                x0 + BLOCK_W // 2,
-                y_iv + 28,
-                text=_abbreviate(_hex(blk.aes_input)),
-                font=("Courier New", 9, "bold"),
-                fill="white",
+            middle_texts.append(
+                self._surface.create_text(
+                    x0 + BLOCK_W // 2,
+                    y_iv + 28,
+                    text=_abbreviate(_hex(blk.aes_input)),
+                    font=("Courier New", 9, "bold"),
+                    fill="white",
+                )
             )
 
         r3 = self._rect(x0, y_ct, fill=COLOUR_CT, outline="#B05A20")  # ciphertext
@@ -259,11 +265,8 @@ class BlockCanvas(ctk.CTkFrame):
 
         # Remember the block's rectangles (for selection) and the area its items
         # cover (for hit-testing; the CBC arrow sits between blocks, not in one).
-        items = [r1, t1, t1b, r3, t3, t3b, idx_t]
-        rects = [r1, r3]
-        if r2 is not None:
-            items += [r2, t2, t2b]
-            rects.insert(1, r2)
+        rects = [r1, *middle_rects, r3]
+        items = [*rects, t1, t1b, *middle_texts, t3, t3b, idx_t]
         self._block_rects[blk.index] = rects
         self._block_bounds[blk.index] = self._surface.bbox(*items)
 
@@ -290,7 +293,7 @@ class BlockCanvas(ctk.CTkFrame):
             self._surface.itemconfigure(rect, outline=COLOUR_SEL, width=3)
         self._selected = index
 
-    def _on_motion(self, event: tk.Event) -> None:  # type: ignore[override]
+    def _on_motion(self, event: tk.Event) -> None:
         idx = self._block_under(event)
         if idx is not None:
             blk = self._blocks[idx]
@@ -404,6 +407,20 @@ class AESTab(ctk.CTkFrame):
             fg_color="#5C6BC0",
         )
         self._dec_btn.grid(row=0, column=7, padx=(4, 8), pady=6)
+
+        # Decryption output: its own read-only field, so decrypting never
+        # overwrites the plaintext the user typed.
+        ctk.CTkLabel(ctrl, text="Decrypted:").grid(
+            row=1, column=0, sticky="w", padx=(8, 2)
+        )
+        self._output_var = tk.StringVar()
+        ctk.CTkEntry(
+            ctrl,
+            textvariable=self._output_var,
+            font=("Courier New", 11),
+            width=280,
+            state="readonly",
+        ).grid(row=1, column=1, padx=4, pady=(0, 6), sticky="ew")
 
     def _build_main_area(self) -> None:
         main = ctk.CTkFrame(self, fg_color="transparent")
@@ -574,93 +591,74 @@ class AESTab(ctk.CTkFrame):
     # Crypto operations
     # ------------------------------------------------------------------
 
-    def _resolve_key(self) -> bytes:
-        """Parse key from hex field or generate a random AES-128 key."""
-        raw = self._key_var.get().strip().replace(" ", "")
-        if raw:
-            try:
-                key = bytes.fromhex(raw)
-            except ValueError as exc:
-                raise ValueError("Key must be a valid hex string.") from exc
-            if len(key) not in (16, 24, 32):
-                raise ValueError(
-                    "Key must be 16, 24, or 32 bytes (32/48/64 hex chars)."
-                )
+    def _encryption_key(self) -> bytes:
+        """The key typed in the field, or a fresh AES-128 key written into it."""
+        if not self._key_var.get().strip():
+            key = os.urandom(16)
+            self._key_var.set(key.hex())
             return key
-        key = os.urandom(16)
-        self._key_var.set(key.hex())
-        return key
+        return key_from_hex(self._key_var.get())
 
     def _do_encrypt(self) -> None:
+        plaintext = self._input_var.get().encode("utf-8")
+        if not plaintext:
+            messagebox.showwarning(
+                "Input required", "Please enter some plaintext first."
+            )
+            return
         try:
-            key = self._resolve_key()
-            plaintext = self._input_var.get().encode("utf-8")
-            if not plaintext:
-                messagebox.showwarning(
-                    "Input required", "Please enter some plaintext first."
-                )
-                return
+            key = self._encryption_key()
+        except ValueError as exc:
+            messagebox.showerror("Invalid key", str(exc))
+            return
 
-            self._last_result = encrypt(AesMode(self._mode_var.get()), plaintext, key)
-            self._block_canvas.draw(self._last_result)
-            self._update_comparison(plaintext, key)
-
-        except Exception as exc:
-            messagebox.showerror("Encryption error", str(exc))
+        self._last_result = encrypt(AesMode(self._mode_var.get()), plaintext, key)
+        self._output_var.set("")  # an earlier decryption no longer applies
+        self._block_canvas.draw(self._last_result)
+        self._update_comparison(plaintext, key)
 
     def _do_decrypt(self) -> None:
         if self._last_result is None:
             messagebox.showinfo("Nothing to decrypt", "Encrypt something first.")
             return
+        # Always read the key from the field so that editing it has real effect.
+        if not self._key_var.get().strip():
+            messagebox.showwarning(
+                "Key required",
+                "The key field is empty.\nEnter the hex key that was used to encrypt.",
+            )
+            return
         try:
-            # Always read the key from the field so that editing it has real effect.
-            raw = self._key_var.get().strip().replace(" ", "")
-            if not raw:
-                messagebox.showwarning(
-                    "Key required",
-                    "The key field is empty.\n"
-                    "Enter the hex key that was used to encrypt.",
-                )
-                return
-            try:
-                key = bytes.fromhex(raw)
-            except ValueError:
-                messagebox.showerror("Invalid key", "Key must be a valid hex string.")
-                return
-            if len(key) not in (16, 24, 32):
-                messagebox.showerror(
-                    "Invalid key",
-                    f"Key must be 16, 24, or 32 bytes ({len(key)} bytes given).",
-                )
-                return
+            key = key_from_hex(self._key_var.get())
+        except ValueError as exc:
+            messagebox.showerror("Invalid key", str(exc))
+            return
 
-            try:
-                plaintext = decrypt(self._last_result, key)
-            except PaddingError as exc:
-                # Show the garbled output so the user sees what the wrong key
-                # actually produces: the educational point of the demo.
-                self._input_var.set(exc.raw.decode("utf-8", errors="replace"))
-                messagebox.showwarning(
-                    "Wrong key",
-                    "Padding check failed — the key is incorrect.\n\n"
-                    "The garbled output has been placed in the plaintext field\n"
-                    "so you can see what the wrong key produces.",
-                )
-                return
-            except AuthenticationError:
-                messagebox.showerror(
-                    "Authentication failed (GCM)",
-                    "The authentication tag does not match.\n\n"
-                    "This means the key is wrong or the ciphertext was "
-                    "tampered with.\n"
-                    "GCM refuses to return any output at all — this is exactly\n"
-                    "why authenticated encryption is safer than ECB or CBC.",
-                )
-                return
-            self._input_var.set(plaintext.decode("utf-8", errors="replace"))
-
-        except Exception as exc:
-            messagebox.showerror("Decryption error", str(exc))
+        try:
+            plaintext = decrypt(self._last_result, key)
+        except PaddingError as exc:
+            # Show the garbled output so the user sees what the wrong key
+            # actually produces: the educational point of the demo.
+            self._output_var.set(exc.raw.decode("utf-8", errors="replace"))
+            messagebox.showwarning(
+                "Wrong key",
+                "Padding check failed — the key is incorrect.\n\n"
+                "The Decrypted field shows the garbled output\n"
+                "so you can see what the wrong key produces.",
+            )
+            return
+        except AuthenticationError:
+            self._output_var.set("")
+            messagebox.showerror(
+                "Authentication failed (GCM)",
+                "The authentication tag does not match.\n\n"
+                "This means the key is wrong or the ciphertext was "
+                "tampered with.\n"
+                "GCM refuses to return any output at all — this is exactly\n"
+                "why authenticated encryption is safer than ECB or CBC.",
+            )
+            return
+        self._output_var.set(plaintext.decode("utf-8", errors="replace"))
 
     def _update_comparison(self, plaintext: bytes, key: bytes) -> None:
         for mode, var in self._comp_vars.items():

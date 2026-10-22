@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
+from tkinter import messagebox
+from types import TracebackType
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -38,8 +41,22 @@ class MainWindow(ctk.CTk):
         self.geometry("1100x700")
         self.minsize(900, 600)
         self.resizable(True, True)
+        # Handlers show dialogs for problems the user can fix (a bad key, empty
+        # input). Anything else escaping a button or event handler is a bug:
+        # report it here, in one place, instead of in a console that may be
+        # hidden, and without each handler needing a catch-all.
+        self.report_callback_exception = self._report_unexpected_error
         self._set_window_icon()
         self._build_ui()
+
+    def _report_unexpected_error(
+        self,
+        exc_type: type[BaseException],
+        exc: BaseException,
+        tb: TracebackType | None,
+    ) -> None:
+        traceback.print_exception(exc_type, exc, tb)
+        messagebox.showerror("Unexpected error", f"{exc_type.__name__}: {exc}")
 
     def _set_window_icon(self) -> None:
         """Show the app icon using the mechanism each platform's Tk supports."""

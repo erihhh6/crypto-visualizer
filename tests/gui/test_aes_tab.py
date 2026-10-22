@@ -5,7 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog
-from typing import Any
+from typing import Any, NamedTuple
 
 import customtkinter as ctk
 import pytest
@@ -29,11 +29,17 @@ def tab(root: Any) -> Any:
     return widget
 
 
-def _entries(tab: Any) -> tuple[Any, Any]:
-    """The plaintext and key fields (created left to right in that order)."""
+class _Fields(NamedTuple):
+    plaintext: Any
+    key: Any
+    decrypted: Any
+
+
+def _fields(tab: Any) -> _Fields:
+    """The plaintext, key and Decrypted entries, in the order they are created."""
     entries = [w for w in descendants(tab) if isinstance(w, ctk.CTkEntry)]
-    require(len(entries) == 2, f"expected plaintext + key entries, got {len(entries)}")
-    return entries[0], entries[1]
+    require(len(entries) == 3, f"expected 3 entry fields, found {len(entries)}")
+    return _Fields(*entries)
 
 
 def _type(entry: Any, text: str) -> None:
@@ -46,24 +52,27 @@ def _choose_mode(tab: Any, mode: AesMode) -> None:
     mode_menu.set(mode)
 
 
-def _encrypt_then_decrypt_with(tab: Any, mode: AesMode, decrypt_key: bytes) -> Any:
-    """Encrypt _MESSAGE with _RIGHT_KEY, clear the field, decrypt with *decrypt_key*."""
-    plaintext, key = _entries(tab)
+def _encrypt_then_decrypt_with(tab: Any, mode: AesMode, decrypt_key: bytes) -> _Fields:
+    """Encrypt _MESSAGE with _RIGHT_KEY, then decrypt with *decrypt_key*."""
+    fields = _fields(tab)
     _choose_mode(tab, mode)
-    _type(plaintext, _MESSAGE)
-    _type(key, _RIGHT_KEY.hex())
+    _type(fields.plaintext, _MESSAGE)
+    _type(fields.key, _RIGHT_KEY.hex())
     find_button(tab, "Encrypt").invoke()
     block_canvas(tab)  # the blocks were drawn
-    _type(plaintext, "")
-    _type(key, decrypt_key.hex())
+    _type(fields.key, decrypt_key.hex())
     find_button(tab, "Decrypt").invoke()
-    return plaintext
+    return fields
 
 
 @pytest.mark.parametrize("mode", list(AesMode))
-def test_encrypt_then_decrypt_restores_the_plaintext(tab: Any, mode: AesMode) -> None:
-    plaintext = _encrypt_then_decrypt_with(tab, mode, _RIGHT_KEY)
-    assert plaintext.get() == _MESSAGE
+def test_decrypting_shows_the_plaintext_in_its_own_field(
+    tab: Any, mode: AesMode
+) -> None:
+    fields = _encrypt_then_decrypt_with(tab, mode, _RIGHT_KEY)
+
+    assert fields.decrypted.get() == _MESSAGE
+    assert fields.plaintext.get() == _MESSAGE  # what the user typed is untouched
 
 
 def test_wrong_key_shows_the_garbled_output_with_a_warning(
@@ -73,23 +82,64 @@ def test_wrong_key_shows_the_garbled_output_with_a_warning(
     with pytest.raises(PaddingError):
         decrypt(encrypt(AesMode.ECB, _MESSAGE.encode(), _RIGHT_KEY), _WRONG_KEY)
 
-    plaintext = _encrypt_then_decrypt_with(tab, AesMode.ECB, _WRONG_KEY)
+    fields = _encrypt_then_decrypt_with(tab, AesMode.ECB, _WRONG_KEY)
 
     assert len(no_dialogs) == 1
     assert no_dialogs[0].startswith("showwarning: Wrong key")
-    assert plaintext.get() not in ("", _MESSAGE)  # the garbled output is shown
+    assert fields.decrypted.get() not in ("", _MESSAGE)  # the garbled output
+    assert fields.plaintext.get() == _MESSAGE
     no_dialogs.clear()  # the warning was the expected outcome
 
 
 def test_gcm_refuses_to_decrypt_with_a_wrong_key(
     tab: Any, no_dialogs: list[str]
 ) -> None:
-    plaintext = _encrypt_then_decrypt_with(tab, AesMode.GCM, _WRONG_KEY)
+    fields = _encrypt_then_decrypt_with(tab, AesMode.GCM, _RIGHT_KEY)
+    require(fields.decrypted.get() == _MESSAGE, "decryption did not fill the field")
+
+    _type(fields.key, _WRONG_KEY.hex())
+    find_button(tab, "Decrypt").invoke()
 
     assert len(no_dialogs) == 1
     assert no_dialogs[0].startswith("showerror: Authentication failed (GCM)")
-    assert plaintext.get() == ""  # GCM releases no output at all
+    # GCM releases nothing, and the earlier plaintext must not linger either.
+    assert fields.decrypted.get() == ""
     no_dialogs.clear()  # the error was the expected outcome
+
+
+def test_encrypting_again_clears_the_previous_decryption(tab: Any) -> None:
+    fields = _encrypt_then_decrypt_with(tab, AesMode.CBC, _RIGHT_KEY)
+    require(fields.decrypted.get() == _MESSAGE, "decryption did not fill the field")
+
+    find_button(tab, "Encrypt").invoke()
+
+    assert fields.decrypted.get() == ""
+
+
+@pytest.mark.parametrize(
+    ("key_text", "explanation"),
+    [("not hex at all", "hexadecimal"), ("00ff", "32, 48 or 64 hex digits")],
+)
+def test_an_invalid_key_is_explained_instead_of_used(
+    tab: Any, no_dialogs: list[str], key_text: str, explanation: str
+) -> None:
+    _type(_fields(tab).key, key_text)
+
+    find_button(tab, "Encrypt").invoke()
+
+    assert len(no_dialogs) == 1
+    assert no_dialogs[0].startswith("showerror: Invalid key")
+    assert explanation in no_dialogs[0]
+    no_dialogs.clear()  # the explanation was the expected outcome
+
+
+def test_an_empty_key_field_gets_a_fresh_aes128_key(tab: Any) -> None:
+    fields = _fields(tab)
+    _type(fields.key, "")
+
+    find_button(tab, "Encrypt").invoke()
+
+    assert len(bytes.fromhex(fields.key.get())) == 16
 
 
 def test_detail_panel_shows_a_placeholder_before_any_click(tab: Any) -> None:

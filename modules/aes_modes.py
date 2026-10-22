@@ -96,6 +96,22 @@ class AuthenticationError(DecryptionError):
     """GCM: the authentication tag does not match (wrong key or altered data)."""
 
 
+def key_from_hex(text: str) -> bytes:
+    """
+    Parse an AES key typed as hexadecimal; whitespace between bytes is ignored.
+
+    Raises ValueError with a message fit to show the user.
+    """
+    try:
+        key = bytes.fromhex(text)
+    except ValueError as exc:
+        raise ValueError(
+            "Key must be hexadecimal: digits 0-9 and A-F, two per byte."
+        ) from exc
+    _validate_key(key)
+    return key
+
+
 # ---------------------------------------------------------------------------
 # Counter blocks
 # ---------------------------------------------------------------------------
@@ -204,7 +220,10 @@ def encrypt_pixels_cbc(pixel_bytes: bytes, key: bytes) -> bytes:
 
 def _validate_key(key: bytes) -> None:
     if len(key) not in KEY_SIZES:
-        raise ValueError(f"Key must be 16, 24, or 32 bytes; got {len(key)}")
+        raise ValueError(
+            f"Key must be 16, 24, or 32 bytes (32, 48 or 64 hex digits); "
+            f"got {len(key)} bytes"
+        )
 
 
 def _pad(data: bytes) -> bytes:
