@@ -1,7 +1,7 @@
 # Crypto Visualizer
 
 [![CI](https://github.com/erihhh6/crypto-visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/erihhh6/crypto-visualizer/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > An interactive Python GUI application that makes cryptographic concepts visible and tangible.
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Requires Python 3.10+.
+Requires Python 3.11+.
 
 ---
 
@@ -48,7 +48,7 @@ python -m mypy           # strict type check
 ```
 
 CI runs the same checks on every push and pull request, with tests on
-Python 3.10–3.15. Tool configuration lives in `pyproject.toml`.
+Python 3.11–3.15. Tool configuration lives in `pyproject.toml`.
 
 ---
 
