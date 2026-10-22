@@ -47,7 +47,6 @@ def test_encrypt_then_decrypt_restores_the_plaintext(tab: Any, mode: str) -> Non
     assert entry.get() == message
 
 
-@known_bug("the block detail panel starts empty; its placeholder is never shown")
 def test_detail_panel_shows_a_placeholder_before_any_click(tab: Any) -> None:
     panels = [w for w in descendants(tab) if isinstance(w, tk.Text)]
     require(len(panels) == 1, f"expected one detail panel, found {len(panels)}")

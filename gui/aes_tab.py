@@ -9,7 +9,6 @@ Layout (top-to-bottom, left-to-right):
 
 from __future__ import annotations
 
-import contextlib
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -52,36 +51,44 @@ def _abbreviate(hex_text: str, limit: int = 16) -> str:
 
 
 class _Tooltip:
-    """Simple Tkinter tooltip shown on canvas hover."""
+    """
+    A borderless window that follows the pointer over a widget.
 
-    def __init__(self, canvas: tk.Canvas) -> None:
-        self._canvas = canvas
+    The window is created once and then moved, re-texted, shown and hidden:
+    building a fresh Toplevel on every <Motion> event made it flicker.
+    """
+
+    def __init__(self, owner: tk.Widget) -> None:
+        self._owner = owner
         self._win: tk.Toplevel | None = None
+        self._label: tk.Label | None = None
 
     def show(self, x: int, y: int, text: str) -> None:
-        self.hide()
-        rx = self._canvas.winfo_rootx() + x + 15
-        ry = self._canvas.winfo_rooty() + y + 10
-        self._win = tk.Toplevel(self._canvas)
-        self._win.wm_overrideredirect(True)
+        """Show *text* just below-right of widget coordinates (*x*, *y*)."""
+        if self._win is None or self._label is None:
+            self._win = tk.Toplevel(self._owner)
+            self._win.wm_overrideredirect(True)
+            self._label = tk.Label(
+                self._win,
+                font=("Courier New", 9),
+                background="#FFFFE0",
+                relief="solid",
+                borderwidth=1,
+                justify="left",
+                padx=4,
+                pady=2,
+            )
+            self._label.pack()
+        if self._label.cget("text") != text:
+            self._label.configure(text=text)
+        rx = self._owner.winfo_rootx() + x + 15
+        ry = self._owner.winfo_rooty() + y + 10
         self._win.wm_geometry(f"+{rx}+{ry}")
-        label = tk.Label(
-            self._win,
-            text=text,
-            font=("Courier New", 9),
-            background="#FFFFE0",
-            relief="solid",
-            borderwidth=1,
-            justify="left",
-            padx=4,
-            pady=2,
-        )
-        label.pack()
+        self._win.deiconify()
 
     def hide(self) -> None:
-        if self._win:
-            self._win.destroy()
-            self._win = None
+        if self._win is not None:
+            self._win.withdraw()
 
 
 class BlockCanvas(ctk.CTkFrame):
@@ -92,27 +99,33 @@ class BlockCanvas(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._canvas = tk.Canvas(
+        # Not "_canvas": CTkFrame keeps its own background canvas under that
+        # name, and overwriting it made every theme change repaint this one.
+        self._surface = tk.Canvas(
             self,
             background=COLOUR_BG,
             highlightthickness=0,
         )
-        self._canvas.grid(row=0, column=0, sticky="nsew")
+        self._surface.grid(row=0, column=0, sticky="nsew")
 
         self._hscroll = ctk.CTkScrollbar(
-            self, orientation="horizontal", command=self._canvas.xview
+            self, orientation="horizontal", command=self._surface.xview
         )
         self._hscroll.grid(row=1, column=0, sticky="ew")
-        self._canvas.configure(xscrollcommand=self._hscroll.set)
+        self._surface.configure(xscrollcommand=self._hscroll.set)
 
-        self._tooltip = _Tooltip(self._canvas)
+        self._tooltip = _Tooltip(self._surface)
         self._blocks: list[BlockInfo] = []
+        # Per block index: its rectangles, and the area it covers on the canvas.
+        self._block_rects: dict[int, list[int]] = {}
+        self._block_bounds: dict[int, tuple[int, int, int, int]] = {}
+        # Each rectangle's own (outline, width), restored when it is deselected.
+        self._normal_borders: dict[int, tuple[str, int]] = {}
         self._selected: int | None = None
-        self._block_ids: dict[int, list[int]] = {}  # index → [rect_id, ...]
 
-        self._canvas.bind("<Motion>", self._on_motion)
-        self._canvas.bind("<Leave>", lambda _e: self._tooltip.hide())
-        self._canvas.bind("<Button-1>", self._on_click)
+        self._surface.bind("<Motion>", self._on_motion)
+        self._surface.bind("<Leave>", lambda _e: self._tooltip.hide())
+        self._surface.bind("<Button-1>", self._on_click)
 
         self._detail_var: tk.StringVar | None = None
 
@@ -120,9 +133,11 @@ class BlockCanvas(ctk.CTkFrame):
         self._detail_var = var
 
     def draw(self, blocks: list[BlockInfo]) -> None:
-        self._canvas.delete("all")
+        self._surface.delete("all")
         self._blocks = blocks
-        self._block_ids = {}
+        self._block_rects = {}
+        self._block_bounds = {}
+        self._normal_borders = {}
         self._selected = None
 
         if not blocks:
@@ -132,35 +147,41 @@ class BlockCanvas(ctk.CTkFrame):
         total_w = len(blocks) * (BLOCK_W + BLOCK_GAP) + BLOCK_GAP + 20
         canvas_h = BLOCK_H * 3 + 80
 
-        self._canvas.configure(scrollregion=(0, 0, total_w, canvas_h))
+        self._surface.configure(scrollregion=(0, 0, total_w, canvas_h))
 
         for blk in blocks:
             x0 = BLOCK_GAP + blk.index * (BLOCK_W + BLOCK_GAP)
             self._draw_block(blk, x0, mode)
+
+    def _rect(self, x0: int, y0: int, fill: str, outline: str) -> int:
+        """Draw one block-sized rectangle and remember its normal border."""
+        width = 2
+        rect = self._surface.create_rectangle(
+            x0,
+            y0,
+            x0 + BLOCK_W,
+            y0 + BLOCK_H,
+            fill=fill,
+            outline=outline,
+            width=width,
+        )
+        self._normal_borders[rect] = (outline, width)
+        return rect
 
     def _draw_block(self, blk: BlockInfo, x0: int, mode: str) -> None:
         y_pt = 20
         y_iv = y_pt + BLOCK_H + 18
         y_ct = y_iv + BLOCK_H + 18
 
-        # Plaintext rectangle
-        r1 = self._canvas.create_rectangle(
-            x0,
-            y_pt,
-            x0 + BLOCK_W,
-            y_pt + BLOCK_H,
-            fill=COLOUR_PT,
-            outline="#3A79B0",
-            width=2,
-        )
-        t1 = self._canvas.create_text(
+        r1 = self._rect(x0, y_pt, fill=COLOUR_PT, outline="#3A79B0")  # plaintext
+        t1 = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_pt + 10,
             text="Plaintext",
             font=("Courier New", 8),
             fill="white",
         )
-        t1b = self._canvas.create_text(
+        t1b = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_pt + 28,
             text=_abbreviate(blk.plaintext_hex),
@@ -174,23 +195,15 @@ class BlockCanvas(ctk.CTkFrame):
             label_iv = {"CBC": "XOR Input", "CTR": "Counter", "GCM": "Counter"}.get(
                 mode, "IV"
             )
-            r2 = self._canvas.create_rectangle(
-                x0,
-                y_iv,
-                x0 + BLOCK_W,
-                y_iv + BLOCK_H,
-                fill=COLOUR_IV,
-                outline="#3A8F58",
-                width=2,
-            )
-            t2 = self._canvas.create_text(
+            r2 = self._rect(x0, y_iv, fill=COLOUR_IV, outline="#3A8F58")
+            t2 = self._surface.create_text(
                 x0 + BLOCK_W // 2,
                 y_iv + 10,
                 text=label_iv,
                 font=("Courier New", 8),
                 fill="white",
             )
-            t2b = self._canvas.create_text(
+            t2b = self._surface.create_text(
                 x0 + BLOCK_W // 2,
                 y_iv + 28,
                 text=_abbreviate(blk.iv_or_xor_hex),
@@ -198,24 +211,15 @@ class BlockCanvas(ctk.CTkFrame):
                 fill="white",
             )
 
-        # Ciphertext rectangle
-        r3 = self._canvas.create_rectangle(
-            x0,
-            y_ct,
-            x0 + BLOCK_W,
-            y_ct + BLOCK_H,
-            fill=COLOUR_CT,
-            outline="#B05A20",
-            width=2,
-        )
-        t3 = self._canvas.create_text(
+        r3 = self._rect(x0, y_ct, fill=COLOUR_CT, outline="#B05A20")  # ciphertext
+        t3 = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_ct + 10,
             text="Ciphertext",
             font=("Courier New", 8),
             fill="white",
         )
-        t3b = self._canvas.create_text(
+        t3b = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_ct + 28,
             text=_abbreviate(blk.ciphertext_hex),
@@ -224,7 +228,7 @@ class BlockCanvas(ctk.CTkFrame):
         )
 
         # Block index label
-        idx_t = self._canvas.create_text(
+        idx_t = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_ct + BLOCK_H + 8,
             text=f"Block {blk.index}",
@@ -234,7 +238,7 @@ class BlockCanvas(ctk.CTkFrame):
 
         # CBC chaining arrow (only for CBC, between blocks)
         if mode == "CBC" and blk.index > 0:
-            self._canvas.create_line(
+            self._surface.create_line(
                 x0 - BLOCK_GAP,
                 y_ct + BLOCK_H // 2,
                 x0,
@@ -244,23 +248,41 @@ class BlockCanvas(ctk.CTkFrame):
                 width=2,
             )
 
-        # Gather all items for this block
-        item_ids = [r1, t1, t1b, r3, t3, t3b, idx_t]
+        # Remember the block's rectangles (for selection) and the area its items
+        # cover (for hit-testing; the CBC arrow sits between blocks, not in one).
+        items = [r1, t1, t1b, r3, t3, t3b, idx_t]
+        rects = [r1, r3]
         if r2 is not None:
-            item_ids += [r2, t2, t2b]
-        self._block_ids[blk.index] = item_ids
+            items += [r2, t2, t2b]
+            rects.insert(1, r2)
+        self._block_rects[blk.index] = rects
+        self._block_bounds[blk.index] = self._surface.bbox(*items)
 
-    def _block_at(self, x: int) -> int | None:
-        """Return block index under canvas x coordinate, or None."""
-        for idx in range(len(self._blocks)):
-            x0 = BLOCK_GAP + idx * (BLOCK_W + BLOCK_GAP)
-            if x0 <= x <= x0 + BLOCK_W:
-                return idx
+    def _block_at(self, x: float, y: float) -> int | None:
+        """Index of the block drawn at canvas point (x, y); None over empty space."""
+        for index, (x0, y0, x1, y1) in self._block_bounds.items():
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                return index
         return None
 
+    def _block_under(self, event: tk.Event) -> int | None:
+        """The block under the pointer, converting window to (scrolled) canvas space."""
+        return self._block_at(
+            self._surface.canvasx(event.x), self._surface.canvasy(event.y)
+        )
+
+    def _select(self, index: int) -> None:
+        """Highlight block *index*, giving the previous selection its border back."""
+        if self._selected is not None:
+            for rect in self._block_rects[self._selected]:
+                outline, width = self._normal_borders[rect]
+                self._surface.itemconfigure(rect, outline=outline, width=width)
+        for rect in self._block_rects[index]:
+            self._surface.itemconfigure(rect, outline=COLOUR_SEL, width=3)
+        self._selected = index
+
     def _on_motion(self, event: tk.Event) -> None:  # type: ignore[override]
-        cx = int(self._canvas.canvasx(event.x))
-        idx = self._block_at(cx)
+        idx = self._block_under(event)
         if idx is not None:
             blk = self._blocks[idx]
             tip = (
@@ -274,25 +296,12 @@ class BlockCanvas(ctk.CTkFrame):
             self._tooltip.hide()
 
     def _on_click(self, event: tk.Event) -> None:
-        cx = int(self._canvas.canvasx(event.x))
-        idx = self._block_at(cx)
+        idx = self._block_under(event)
         if idx is None:
             return
 
-        # Reset previous selection
-        if self._selected is not None and self._selected in self._block_ids:
-            for item in self._block_ids[self._selected]:
-                with contextlib.suppress(tk.TclError):
-                    self._canvas.itemconfigure(item, outline="")
-
-        self._selected = idx
+        self._select(idx)
         blk = self._blocks[idx]
-
-        # Highlight selection with red outline on the block rectangles
-        rects = [self._block_ids[idx][0], self._block_ids[idx][3]]
-        for rect in rects:
-            self._canvas.itemconfigure(rect, outline=COLOUR_SEL, width=3)
-
         if self._detail_var:
             self._detail_var.set(
                 f"Block {blk.index} — {blk.mode_label}\n"
@@ -431,11 +440,13 @@ class AESTab(ctk.CTkFrame):
 
         self._detail_var = tk.StringVar(value="Click a block to see details…")
         self._block_canvas.set_detail_var(self._detail_var)
-        # Keep a trace so the Text widget stays in sync with the StringVar
+        # Keep a trace so the Text widget stays in sync with the StringVar.
+        # A trace only fires on later writes, so show the placeholder now.
         self._detail_var.trace_add(
             "write",
             lambda *_: self._sync_detail_text(),
         )
+        self._sync_detail_text()
 
         # -------- Right: Image ECB demo --------
         right = ctk.CTkFrame(main)

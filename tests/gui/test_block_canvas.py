@@ -19,7 +19,6 @@ from tests.gui.helpers import (
     pump,
     require,
 )
-from tests.markers import known_bug
 
 
 @pytest.fixture
@@ -62,26 +61,57 @@ def _plaintext_center(canvas: tk.Canvas, index: int) -> tuple[int, int]:
     return int((x0 + x1) / 2), int((y0 + y1) / 2)
 
 
+def _border(canvas: tk.Canvas, index: int) -> tuple[str, str]:
+    rect = _plaintext_rect(canvas, index)
+    return item_option(canvas, rect, "outline"), item_option(canvas, rect, "width")
+
+
+def _click(canvas: tk.Canvas, index: int) -> None:
+    x, y = _plaintext_center(canvas, index)
+    canvas.event_generate("<Button-1>", x=x, y=y)
+
+
 def _tooltip_windows(root: Any) -> list[tk.Toplevel]:
     return [w for w in descendants(root) if isinstance(w, tk.Toplevel)]
 
 
-@known_bug("deselecting a block clears its border instead of restoring it")
+def _visible_tooltip_text(root: Any) -> str:
+    shown = [w for w in _tooltip_windows(root) if w.winfo_ismapped()]
+    require(len(shown) == 1, f"expected one visible tooltip, found {len(shown)}")
+    labels = [w for w in descendants(shown[0]) if isinstance(w, tk.Label)]
+    require(len(labels) == 1, "tooltip window has no single text label")
+    return str(labels[0].cget("text"))
+
+
 def test_deselected_block_gets_its_border_back(canvas: tk.Canvas) -> None:
-    rect = _plaintext_rect(canvas, 0)
+    original = _border(canvas, 0)
 
-    def border() -> tuple[str, str]:
-        return item_option(canvas, rect, "outline"), item_option(canvas, rect, "width")
+    _click(canvas, 0)
+    _click(canvas, 1)  # moves the selection away from block 0
 
-    original = border()
-    for index in (0, 1):  # select block 0, then move the selection to block 1
+    assert _border(canvas, 0) == original
+
+
+def test_clicking_a_block_highlights_only_that_block(canvas: tk.Canvas) -> None:
+    _click(canvas, 0)
+    _click(canvas, 1)
+
+    unselected = {_border(canvas, 0), _border(canvas, 2)}
+    assert len(unselected) == 1, "unselected blocks should share one border"
+    assert _border(canvas, 1) not in unselected
+
+
+def test_tooltip_follows_the_pointer_to_the_next_block(
+    canvas: tk.Canvas, root: Any
+) -> None:
+    for index in (0, 1):
         x, y = _plaintext_center(canvas, index)
-        canvas.event_generate("<Button-1>", x=x, y=y)
+        canvas.event_generate("<Motion>", x=x, y=y)
+    pump(root, 50)
 
-    assert border() == original
+    assert _visible_tooltip_text(root).startswith("Block 1")
 
 
-@known_bug("the tooltip opens a new window on every mouse move")
 def test_hovering_one_block_reuses_a_single_tooltip_window(
     canvas: tk.Canvas, root: Any
 ) -> None:
@@ -95,7 +125,6 @@ def test_hovering_one_block_reuses_a_single_tooltip_window(
     assert len(seen) == 1, f"{len(seen)} tooltip windows created for one block"
 
 
-@known_bug("hovering empty space below a block still shows its tooltip")
 def test_no_tooltip_over_empty_space_below_the_blocks(
     canvas: tk.Canvas, root: Any
 ) -> None:
@@ -110,10 +139,6 @@ def test_no_tooltip_over_empty_space_below_the_blocks(
     assert not [w for w in _tooltip_windows(root) if w.winfo_ismapped()]
 
 
-@known_bug(
-    "a theme switch repaints the block canvas with the frame colour, because "
-    "BlockCanvas overwrites CTkFrame's own _canvas attribute"
-)
 def test_theme_switch_keeps_the_block_canvas_background(
     canvas: tk.Canvas, root: Any
 ) -> None:
