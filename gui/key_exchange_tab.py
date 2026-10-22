@@ -59,18 +59,16 @@ def _value_line(item: Value) -> str:
     return f"{icon} {item.symbol} = {_format(item.value)}"
 
 
+CARD_BG = "#1E2533"
+CURRENT_CARD_BG = "#2C3E50"
+AUTOPLAY_MS = 1500  # time on each step when playing
+
+
 class StepCard(ctk.CTkFrame):
     """A single step card in the step animator scroll frame."""
 
-    def __init__(
-        self,
-        parent: tk.Widget,
-        step: Step,
-        highlighted: bool = False,
-        **kwargs: object,
-    ) -> None:
-        bg = "#2C3E50" if highlighted else "#1E2533"
-        super().__init__(parent, fg_color=bg, corner_radius=8, **kwargs)
+    def __init__(self, parent: tk.Widget, step: Step, **kwargs: object) -> None:
+        super().__init__(parent, fg_color=CARD_BG, corner_radius=8, **kwargs)
         self.grid_columnconfigure(1, weight=1)
 
         actor_col = ACTOR_COLOURS[step.actor]
@@ -118,6 +116,10 @@ class StepCard(ctk.CTkFrame):
                 wraplength=300,
             ).grid(row=row, column=1, sticky="w", padx=4, pady=(0, 8 if last else 2))
 
+    def set_current(self, current: bool) -> None:
+        """Highlight the card while its step is the current one."""
+        self.configure(fg_color=CURRENT_CARD_BG if current else CARD_BG)
+
 
 class KeyExchangeTab(ctk.CTkFrame):
     """Key Exchange tab with step animator and protocol plot."""
@@ -128,14 +130,25 @@ class KeyExchangeTab(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         self._steps: tuple[Step, ...] = ()
+        # One card per step, made once per run; cards after the furthest step
+        # reached so far stay hidden, so the story unfolds one step at a time.
+        self._cards: list[StepCard] = []
         self._current_step: int = 0
+        self._furthest_step: int = 0
         self._mode: str = "DH"
+        self._autoplay_job: str | None = None
         # The plotted stand-in for the P-256 exchange, made with each ECDH run.
         self._toy_exchange: ToyECDH | None = None
 
         self._build_controls()
         self._build_main_area()
         self._build_comparison_table()
+
+        # ←/→ step through the exchange. Bound on the window, not this frame,
+        # since a frame never has the keyboard focus; _on_arrow ignores keys
+        # meant for other tabs or text fields.
+        for key in ("<Left>", "<Right>"):
+            self.winfo_toplevel().bind(key, self._on_arrow, add="+")
 
     # ------------------------------------------------------------------
     # UI builders
@@ -217,6 +230,16 @@ class KeyExchangeTab(ctk.CTkFrame):
         nav = ctk.CTkFrame(hdr, fg_color="transparent")
         nav.grid(row=0, column=1, sticky="e")
 
+        self._play_btn = ctk.CTkButton(
+            nav,
+            text="Play ▶",
+            command=self._toggle_autoplay,
+            width=80,
+            state="disabled",
+            fg_color="#555",
+        )
+        self._play_btn.pack(side="left", padx=(2, 8))
+
         self._prev_btn = ctk.CTkButton(
             nav,
             text="← Prev",
@@ -296,26 +319,16 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._status_var.set("Running DH exchange…")
         self.update_idletasks()
         group = self._dh_groups[self._dh_group_var.get()]
-        self._steps = dh_steps(run_dh(group))
-        self._current_step = 0
         self._mode = "DH"
-        self._render_steps()
+        self._start(dh_steps(run_dh(group)))
         self._plot.show_dh_flow(group)
-        self._status_var.set(
-            f"DH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
-        )
 
     def _run_ecdh(self) -> None:
         self._status_var.set("Running ECDH exchange…")
         self.update_idletasks()
-        self._steps = ecdh_steps(run_ecdh())
         self._toy_exchange = run_toy_ecdh()
-        self._current_step = 0
         self._mode = "ECDH"
-        self._render_steps()  # also plots the toy exchange
-        self._status_var.set(
-            f"ECDH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
-        )
+        self._start(ecdh_steps(run_ecdh()))  # also plots the toy exchange
 
     def _show_comparison(self) -> None:
         if self._comp_visible:
@@ -331,45 +344,55 @@ class KeyExchangeTab(ctk.CTkFrame):
     # Step rendering
     # ------------------------------------------------------------------
 
-    def _render_steps(self) -> None:
-        for w in self._step_scroll.winfo_children():
-            w.destroy()
+    def _start(self, steps: tuple[Step, ...]) -> None:
+        """Show a new exchange: its cards are made once, then only step 1 shows."""
+        self._stop_autoplay()
+        for card in self._cards:
+            card.destroy()
+        self._steps = steps
+        self._cards = [StepCard(self._step_scroll, step) for step in steps]
+        self._rewind()
+        self._play_btn.configure(state="normal")
 
-        for step in self._steps:
-            highlighted = step.number - 1 == self._current_step
-            card = StepCard(
-                self._step_scroll,
-                step,
-                highlighted=highlighted,
-            )
-            card.grid(
-                row=step.number - 1,
-                column=0,
-                sticky="ew",
-                padx=4,
-                pady=4,
-            )
+    def _rewind(self) -> None:
+        """Hide every card but the first and make step 1 current."""
+        for row, card in enumerate(self._cards):
+            card.grid(row=row, column=0, sticky="ew", padx=4, pady=4)
+            card.set_current(False)
+            if row:
+                card.grid_remove()  # grid() later restores these options
+        self._current_step = self._furthest_step = 0
+        self._go_to(0)
 
-        self._prev_btn.configure(
-            state="normal" if self._current_step > 0 else "disabled"
-        )
-        self._next_btn.configure(
-            state="normal" if self._current_step < len(self._steps) - 1 else "disabled"
+    def _go_to(self, index: int) -> None:
+        """Make step *index* current, revealing it and every step before it."""
+        self._cards[self._current_step].set_current(False)
+        for card in self._cards[self._furthest_step + 1 : index + 1]:
+            card.grid()
+        self._furthest_step = max(self._furthest_step, index)
+        self._current_step = index
+        self._cards[index].set_current(True)
+
+        last = len(self._cards) - 1
+        self._prev_btn.configure(state="normal" if index > 0 else "disabled")
+        self._next_btn.configure(state="normal" if index < last else "disabled")
+        self._status_var.set(
+            f"{self._mode} exchange: step {index + 1} of {last + 1}. "
+            "Next/Prev or ←/→, or Play."
         )
         self._scroll_to_current()
         self._update_plot_for_step()
 
     def _scroll_to_current(self) -> None:
         """Scroll the step list so that the current card starts at the top."""
-        cards = self._step_scroll.winfo_children()
-        if not cards:
+        if not self._cards:
             return
-        # The cards were just created: lay them out (which also updates the
-        # scroll region) before measuring them, or the view stops short.
+        # A card may just have been shown: lay it out (which also updates the
+        # scroll region) before measuring, or the view stops short.
         self.update_idletasks()
         # CustomTkinter offers no public access to the scrollable frame's canvas.
         canvas = self._step_scroll._parent_canvas
-        top = cards[self._current_step].winfo_y()
+        top = self._cards[self._current_step].winfo_y()
         # Tk rounds the view to whole scroll increments (CustomTkinter uses 30
         # pixels on Linux): round down, so the card is never cut off at the top.
         increment = int(canvas.winfo_fpixels(canvas.cget("yscrollincrement")))
@@ -377,15 +400,57 @@ class KeyExchangeTab(ctk.CTkFrame):
             top -= top % increment
         canvas.yview_moveto(top / max(self._step_scroll.winfo_height(), 1))
 
+    # ------------------------------------------------------------------
+    # Navigation: buttons, arrow keys and autoplay
+    # ------------------------------------------------------------------
+
     def _prev_step(self) -> None:
+        self._stop_autoplay()  # the user takes over
         if self._current_step > 0:
-            self._current_step -= 1
-            self._render_steps()
+            self._go_to(self._current_step - 1)
 
     def _next_step(self) -> None:
-        if self._current_step < len(self._steps) - 1:
-            self._current_step += 1
-            self._render_steps()
+        self._stop_autoplay()
+        if self._current_step < len(self._cards) - 1:
+            self._go_to(self._current_step + 1)
+
+    def _on_arrow(self, event: tk.Event) -> None:
+        """←/→ step through the exchange, unless the keys are meant elsewhere."""
+        if not self._cards or not (self.winfo_exists() and self.winfo_ismapped()):
+            return  # no exchange yet, or another tab is showing
+        if isinstance(event.widget, tk.Entry | tk.Text):
+            return  # the user is moving a text cursor
+        if event.keysym == "Left":
+            self._prev_step()
+        else:
+            self._next_step()
+
+    def _toggle_autoplay(self) -> None:
+        if self._autoplay_job is not None:
+            self._stop_autoplay()
+            return
+        if self._current_step == len(self._cards) - 1:
+            self._rewind()  # at the end: play the story again from the start
+        self._play_btn.configure(text="Pause")
+        self._autoplay_job = self.after(AUTOPLAY_MS, self._autoplay_tick)
+
+    def _autoplay_tick(self) -> None:
+        self._go_to(self._current_step + 1)
+        if self._current_step < len(self._cards) - 1:
+            self._autoplay_job = self.after(AUTOPLAY_MS, self._autoplay_tick)
+        else:
+            self._autoplay_job = None
+            self._play_btn.configure(text="Play ▶")
+
+    def _stop_autoplay(self) -> None:
+        if self._autoplay_job is not None:
+            self.after_cancel(self._autoplay_job)
+            self._autoplay_job = None
+        self._play_btn.configure(text="Play ▶")
+
+    def destroy(self) -> None:
+        self._stop_autoplay()  # a pending step would run on destroyed widgets
+        super().destroy()
 
     # ------------------------------------------------------------------
     # Plot

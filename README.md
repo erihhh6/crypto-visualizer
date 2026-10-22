@@ -16,7 +16,7 @@
 - **Mode comparison** — one message and key through all four modes; equal 16-byte blocks share a colour, so ECB's repeated blocks stand out, and each mode's length, IV/counter and tag are listed
 - **Tamper Lab** — decrypt with wrong keys (one, or 20,000 to measure the padding check's ~1-in-255 false accepts) and edit a message without the key by XORing its ciphertext: CTR applies the edit exactly, CBC garbles the block before, ECB only garbles, GCM refuses
 - **ECB Penguin Attack** — load any BMP image and see why ECB mode is dangerous (structural patterns survive encryption)
-- **Key Exchange** — Diffie-Hellman (3072-bit RFC 3526 group 15 by default, which matches P-256's 128-bit security, or 2048-bit group 14) and ECDH (SECP256R1) with step-by-step animation, both ending with an AES-256 key derived by HKDF-SHA256; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
+- **Key Exchange** — Diffie-Hellman (3072-bit RFC 3526 group 15 by default, which matches P-256's 128-bit security, or 2048-bit group 14) and ECDH (SECP256R1), told one step at a time (Next/Prev, ←/→ keys or autoplay), both ending with an AES-256 key derived by HKDF-SHA256; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
 
 ---

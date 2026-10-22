@@ -9,7 +9,7 @@ import customtkinter as ctk
 import pytest
 
 from gui.exchange_plot import ExchangePlot
-from gui.key_exchange_tab import KeyExchangeTab, StepCard
+from gui.key_exchange_tab import CURRENT_CARD_BG, KeyExchangeTab, StepCard
 from modules.key_exchange import Point
 from modules.toy_curve import TOY_CURVE, TOY_GENERATOR, TOY_ORDER
 from tests.gui.helpers import descendants, find_button, label_text, pump, require
@@ -42,12 +42,168 @@ def _value_lines(tab: Any) -> list[str]:
     ]
 
 
-@pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])
-def test_running_a_protocol_shows_six_step_cards(tab: Any, protocol: str) -> None:
-    find_button(tab, protocol).invoke()
-    pump(tab)
+# ---------------------------------------------------------------------------
+# Stepping through the story
+# ---------------------------------------------------------------------------
 
-    assert len(_card_lines(tab)) == 6
+
+def _cards(tab: Any) -> list[StepCard]:
+    return [w for w in descendants(tab) if isinstance(w, StepCard)]
+
+
+def _shown(tab: Any) -> list[int]:
+    """The step numbers whose cards are on display."""
+    pump(tab, 50)
+    return [n for n, card in enumerate(_cards(tab), start=1) if card.winfo_ismapped()]
+
+
+def _current(tab: Any) -> list[int]:
+    """The step numbers whose cards are highlighted as current."""
+    return [
+        n
+        for n, card in enumerate(_cards(tab), start=1)
+        if card.cget("fg_color") == CURRENT_CARD_BG
+    ]
+
+
+def _press(tab: Any, key: str, widget: Any = None) -> None:
+    """Send an arrow key, as Tk would to the widget with the keyboard focus."""
+    target = widget or tab
+    target.focus_force()
+    pump(tab, 30)
+    target.event_generate(key)
+
+
+@pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])
+def test_a_run_starts_with_only_its_first_step(tab: Any, protocol: str) -> None:
+    find_button(tab, protocol).invoke()
+
+    assert len(_cards(tab)) == 6
+    assert _shown(tab) == [1]
+    assert _current(tab) == [1]
+
+
+def test_next_reveals_one_step_at_a_time_and_prev_keeps_them(tab: Any) -> None:
+    find_button(tab, "Run DH").invoke()
+    for _ in range(3):
+        find_button(tab, "Next").invoke()
+    require(_shown(tab) == [1, 2, 3, 4], f"Next revealed {_shown(tab)}")
+
+    find_button(tab, "Prev").invoke()
+
+    assert _shown(tab) == [1, 2, 3, 4]  # step 4 stays readable
+    assert _current(tab) == [3]
+
+
+def test_moving_between_steps_keeps_the_same_cards(tab: Any) -> None:
+    find_button(tab, "Run ECDH").invoke()
+    before = _cards(tab)
+
+    find_button(tab, "Next").invoke()
+    find_button(tab, "Prev").invoke()
+
+    assert all(a is b for a, b in zip(before, _cards(tab), strict=True))
+
+
+def test_arrow_keys_step_through_the_story(tab: Any) -> None:
+    find_button(tab, "Run DH").invoke()
+
+    _press(tab, "<Right>")
+    _press(tab, "<Right>")
+    assert _current(tab) == [3]
+
+    _press(tab, "<Left>")
+    assert _current(tab) == [2]
+
+
+def test_arrow_keys_in_a_text_field_only_move_its_cursor(tab: Any, root: Any) -> None:
+    find_button(tab, "Run DH").invoke()
+    entry = ctk.CTkEntry(root)
+    entry.pack()
+    (text_field,) = [w for w in descendants(entry) if isinstance(w, tk.Entry)]
+
+    _press(tab, "<Right>", widget=text_field)
+
+    assert _current(tab) == [1]
+
+
+def test_arrow_keys_do_nothing_while_the_tab_is_hidden(tab: Any) -> None:
+    find_button(tab, "Run DH").invoke()
+    tab.pack_forget()  # as when another tab is selected
+
+    _press(tab, "<Right>", widget=tab.winfo_toplevel())
+
+    assert _current(tab) == [1]
+
+
+@pytest.fixture
+def fast_autoplay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gui.key_exchange_tab.AUTOPLAY_MS", 10)
+
+
+@pytest.mark.usefixtures("fast_autoplay")
+def test_play_reveals_every_step_then_stops(tab: Any) -> None:
+    find_button(tab, "Run ECDH").invoke()
+
+    find_button(tab, "Play").invoke()
+    pump(tab, 400)
+
+    assert _shown(tab) == [1, 2, 3, 4, 5, 6]
+    assert _current(tab) == [6]
+    assert find_button(tab, "Play").cget("text") == "Play ▶"  # stopped by itself
+
+
+def test_pressing_prev_pauses_the_autoplay(
+    tab: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("gui.key_exchange_tab.AUTOPLAY_MS", 100)
+    find_button(tab, "Run DH").invoke()
+    find_button(tab, "Next").invoke()  # Prev is disabled on step 1
+    find_button(tab, "Play").invoke()
+    require(find_button(tab, "Pause") is not None, "Play did not start")
+
+    find_button(tab, "Prev").invoke()
+    pump(tab, 400)
+
+    assert _current(tab) == [1]
+    assert _shown(tab) == [1, 2]
+    assert find_button(tab, "Play").cget("text") == "Play ▶"
+
+
+def test_pause_stops_the_autoplay(tab: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gui.key_exchange_tab.AUTOPLAY_MS", 100)
+    find_button(tab, "Run DH").invoke()
+    find_button(tab, "Play").invoke()
+
+    find_button(tab, "Pause").invoke()
+    pump(tab, 400)
+
+    assert _current(tab) == [1]
+    assert find_button(tab, "Play").cget("text") == "Play ▶"
+
+
+def test_play_at_the_end_tells_the_story_again(tab: Any) -> None:
+    # At the normal pace, so no step plays while the test looks.
+    find_button(tab, "Run DH").invoke()
+    for _ in range(5):
+        find_button(tab, "Next").invoke()
+
+    find_button(tab, "Play").invoke()
+
+    assert _shown(tab) == [1]  # back to the start before the first tick
+    assert _current(tab) == [1]
+
+
+def test_closing_the_tab_cancels_a_pending_autoplay_step(tab: Any) -> None:
+    find_button(tab, "Run DH").invoke()
+    pending_before = set(tab.tk.call("after", "info"))
+    find_button(tab, "Play").invoke()
+    autoplay = set(tab.tk.call("after", "info")) - pending_before
+    require(len(autoplay) == 1, f"expected one new timer, found {autoplay}")
+
+    tab.destroy()
+
+    assert not autoplay & set(tab.tk.call("after", "info"))
 
 
 def test_dh_shows_the_public_parameters_as_public(tab: Any) -> None:
