@@ -12,12 +12,10 @@ from __future__ import annotations
 import tkinter as tk
 
 import customtkinter as ctk
-import matplotlib
 import numpy as np
-
-matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 
 from modules.key_exchange import (
     DHStep,
@@ -226,7 +224,10 @@ class KeyExchangeTab(ctk.CTkFrame):
             font=ctk.CTkFont(size=13, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
 
-        self._fig, self._ax = plt.subplots(figsize=(5, 4))
+        # A bare Figure, not pyplot: pyplot attaches its figures to a hidden Tk
+        # root of its own, which kept mainloop() running after the window closed.
+        self._fig = Figure(figsize=(5, 4))
+        self._ax = self._fig.add_subplot()
         self._fig.patch.set_facecolor("#1E2533")
         self._ax.set_facecolor("#1E2533")
         self._ax.tick_params(colors="gray")
@@ -425,7 +426,7 @@ class KeyExchangeTab(ctk.CTkFrame):
         )
 
         # Alice box
-        self._ax.add_patch(plt.Rectangle((0.5, 2), 2, 2, color="#2E86AB", zorder=2))
+        self._ax.add_patch(Rectangle((0.5, 2), 2, 2, color="#2E86AB", zorder=2))
         self._ax.text(
             1.5,
             3,
@@ -438,7 +439,7 @@ class KeyExchangeTab(ctk.CTkFrame):
         )
 
         # Bob box
-        self._ax.add_patch(plt.Rectangle((7.5, 2), 2, 2, color="#E07B39", zorder=2))
+        self._ax.add_patch(Rectangle((7.5, 2), 2, 2, color="#E07B39", zorder=2))
         self._ax.text(
             8.5,
             3,

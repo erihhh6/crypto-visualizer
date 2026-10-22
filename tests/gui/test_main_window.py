@@ -60,7 +60,6 @@ def test_the_app_starts() -> None:
     assert result.returncode == 0, f"app failed to start:\n{result.stderr}"
 
 
-@known_bug("closing the window leaves the process running (pyplot's hidden Tk root)")
 def test_closing_the_window_ends_the_process() -> None:
     result = run_app_script(_CLOSE_WINDOW)
 

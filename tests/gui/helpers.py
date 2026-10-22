@@ -92,7 +92,7 @@ def run_app_script(code: str, timeout: float = 120) -> subprocess.CompletedProce
     """
     Run *code* in a fresh interpreter from the repository root.
 
-    Import-time behaviour (appearance mode, matplotlib backend) only shows up
+    Import-time behaviour (such as the appearance mode) only shows up
     the way a user sees it in a process that has not imported the app before.
     """
     return subprocess.run(
