@@ -13,6 +13,7 @@
 ## What this visualizes
 
 - **AES Modes** — ECB, CBC, CTR, GCM drawn as per-block data flow (IV and CBC chaining, counters and keystream, the GCM tag), with hover tooltips and click-to-inspect
+- **Mode comparison** — one message and key through all four modes; equal 16-byte blocks share a colour, so ECB's repeated blocks stand out, and each mode's length, IV/counter and tag are listed
 - **ECB Penguin Attack** — load any BMP image and see why ECB mode is dangerous (structural patterns survive encryption)
 - **Key Exchange** — Diffie-Hellman (2048-bit, RFC 3526 Group 14) and ECDH (SECP256R1) with step-by-step animation; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
@@ -86,7 +87,7 @@ crypto-visualizer/
 │   ├── aes_tab.py             # AES tab: controls, encrypt/decrypt, panel layout
 │   ├── block_canvas.py        # Per-block data-flow diagram, tooltips and details
 │   ├── image_demo.py          # ECB vs CBC on an image's pixels
-│   ├── mode_comparison.py     # One plaintext under all four modes
+│   ├── mode_comparison.py     # One message in all four modes, equal blocks coloured
 │   ├── tooltip.py             # Pointer-following tooltip window
 │   ├── palette.py             # Colours shared between widgets
 │   ├── key_exchange_tab.py    # Step animator and key-size comparison table

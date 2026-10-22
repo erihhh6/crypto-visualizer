@@ -15,13 +15,15 @@ from modules.aes_modes import AesMode, EncryptionResult, encrypt
 from tests.gui.helpers import (
     block_canvas,
     click_block,
-    descendants,
     item_option,
     item_type,
     plaintext_center,
     plaintext_rect,
     pump,
     require,
+    tooltip_windows,
+    visible_tooltip_text,
+    visible_tooltips,
 )
 
 
@@ -38,22 +40,6 @@ def canvas(root: Any) -> tk.Canvas:
 def _border(canvas: tk.Canvas, index: int) -> tuple[str, str]:
     rect = plaintext_rect(canvas, index)
     return item_option(canvas, rect, "outline"), item_option(canvas, rect, "width")
-
-
-def _tooltip_windows(root: Any) -> list[tk.Toplevel]:
-    return [w for w in descendants(root) if isinstance(w, tk.Toplevel)]
-
-
-def _visible_tooltips(root: Any) -> list[tk.Toplevel]:
-    return [w for w in _tooltip_windows(root) if w.winfo_ismapped()]
-
-
-def _visible_tooltip_text(root: Any) -> str:
-    shown = _visible_tooltips(root)
-    require(len(shown) == 1, f"expected one visible tooltip, found {len(shown)}")
-    labels = [w for w in descendants(shown[0]) if isinstance(w, tk.Label)]
-    require(len(labels) == 1, "tooltip window has no single text label")
-    return str(labels[0].cget("text"))
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +272,7 @@ def test_tooltip_follows_the_pointer_to_the_next_block(
         canvas.event_generate("<Motion>", x=x, y=y)
     pump(root, 50)
 
-    assert _visible_tooltip_text(root).startswith("Block 1")
+    assert visible_tooltip_text(root).startswith("Block 1")
 
 
 def test_hovering_one_block_reuses_a_single_tooltip_window(
@@ -296,7 +282,7 @@ def test_hovering_one_block_reuses_a_single_tooltip_window(
     seen: set[str] = set()
     for dx in range(-20, 21, 2):
         canvas.event_generate("<Motion>", x=x + dx, y=y)
-        seen |= {str(w) for w in _tooltip_windows(root)}
+        seen |= {str(w) for w in tooltip_windows(root)}
 
     require(bool(seen), "hovering a block showed no tooltip at all")
     assert len(seen) == 1, f"{len(seen)} tooltip windows created for one block"
@@ -316,12 +302,12 @@ def test_tooltip_hides_over_empty_space_below_the_blocks(
     x, y = plaintext_center(canvas, 0)
     canvas.event_generate("<Motion>", x=x, y=y)
     pump(root, 50)
-    require(bool(_visible_tooltips(root)), "hovering a block showed no tooltip")
+    require(bool(visible_tooltips(root)), "hovering a block showed no tooltip")
 
     canvas.event_generate("<Motion>", x=x, y=_below_the_blocks(canvas))
     pump(root, 50)
 
-    assert not _visible_tooltips(root)
+    assert not visible_tooltips(root)
 
 
 def test_tooltip_comes_back_after_hiding(canvas: tk.Canvas, root: Any) -> None:
@@ -330,7 +316,7 @@ def test_tooltip_comes_back_after_hiding(canvas: tk.Canvas, root: Any) -> None:
         canvas.event_generate("<Motion>", x=x, y=pointer_y)
         pump(root, 50)
 
-    assert _visible_tooltip_text(root).startswith("Block 0")
+    assert visible_tooltip_text(root).startswith("Block 0")
 
 
 def test_theme_switch_keeps_the_block_canvas_background(

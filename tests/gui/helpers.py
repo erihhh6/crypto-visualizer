@@ -62,6 +62,22 @@ def item_option(canvas: tk.Canvas, item: int, option: str) -> str:
     return str(canvas.itemcget(item, option))  # type: ignore[no-untyped-call]
 
 
+def tooltip_windows(root: tk.Misc) -> list[tk.Toplevel]:
+    return [w for w in descendants(root) if isinstance(w, tk.Toplevel)]
+
+
+def visible_tooltips(root: tk.Misc) -> list[tk.Toplevel]:
+    return [w for w in tooltip_windows(root) if w.winfo_ismapped()]
+
+
+def visible_tooltip_text(root: tk.Misc) -> str:
+    shown = visible_tooltips(root)
+    require(len(shown) == 1, f"expected one visible tooltip, found {len(shown)}")
+    labels = [w for w in descendants(shown[0]) if isinstance(w, tk.Label)]
+    require(len(labels) == 1, "tooltip window has no single text label")
+    return str(labels[0].cget("text"))
+
+
 def label_text(label: Any) -> str:
     """The text a CTkLabel shows, whether set directly or through a variable."""
     # cget returns the variable's Tcl name (a Tcl_Obj, not a tk.Variable),

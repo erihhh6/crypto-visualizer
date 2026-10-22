@@ -162,10 +162,17 @@ class AESTab(ctk.CTkFrame):
             messagebox.showerror("Invalid key", str(exc))
             return
 
-        self._last_result = encrypt(AesMode(self._mode_var.get()), plaintext, key)
+        selected = AesMode(self._mode_var.get())
+        self._last_result = encrypt(selected, plaintext, key)
         self._output_var.set("")  # an earlier decryption no longer applies
         self._block_panel.draw(self._last_result)
-        self._comparison.show(encrypt(mode, plaintext, key) for mode in AesMode)
+        # The selected mode's card must show the encryption drawn above, not a
+        # second one with a different IV.
+        results = [
+            self._last_result if mode is selected else encrypt(mode, plaintext, key)
+            for mode in AesMode
+        ]
+        self._comparison.show(plaintext, results, selected)
 
     def _do_decrypt(self) -> None:
         if self._last_result is None:

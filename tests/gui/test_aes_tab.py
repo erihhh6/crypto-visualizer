@@ -1,4 +1,4 @@
-"""AESTab: encryption round trips, block details and the image demo."""
+"""AESTab: round trips, block details, the mode comparison and the image demo."""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ import pytest
 from PIL import Image
 
 from gui.aes_tab import AESTab
+from gui.mode_comparison import NEUTRAL, BlockStrip, ModeCard
 from modules.aes_modes import AesMode, PaddingError, decrypt, encrypt
 from tests.gui.helpers import (
     block_canvas,
     click_block,
     descendants,
     find_button,
+    item_option,
     label_text,
     pump,
     require,
@@ -60,11 +62,11 @@ def _choose_mode(tab: Any, mode: AesMode) -> None:
     mode_menu.set(mode)
 
 
-def _encrypt(tab: Any, mode: AesMode) -> _Fields:
-    """Encrypt _MESSAGE with _RIGHT_KEY in *mode*."""
+def _encrypt(tab: Any, mode: AesMode, message: str = _MESSAGE) -> _Fields:
+    """Encrypt *message* with _RIGHT_KEY in *mode*."""
     fields = _fields(tab)
     _choose_mode(tab, mode)
-    _type(fields.plaintext, _MESSAGE)
+    _type(fields.plaintext, message)
     _type(fields.key, _RIGHT_KEY.hex())
     find_button(tab, "Encrypt").invoke()
     return fields
@@ -188,14 +190,73 @@ def test_encrypting_again_clears_the_block_details(tab: Any) -> None:
     assert _details(tab) == placeholder
 
 
-def test_encrypting_fills_the_comparison_for_every_mode(tab: Any) -> None:
-    _encrypt(tab, AesMode.CBC)
+# ---------------------------------------------------------------------------
+# Mode comparison
+# ---------------------------------------------------------------------------
 
-    shown = [label_text(w) for w in descendants(tab) if isinstance(w, ctk.CTkLabel)]
-    assert "(no data)" not in shown
-    # ECB has no IV, so its ciphertext for this key is known in advance.
-    ecb = encrypt(AesMode.ECB, _MESSAGE.encode(), _RIGHT_KEY).ciphertext.hex().upper()
-    assert ecb[:64] + "…" in shown
+
+def _cards(tab: Any) -> dict[AesMode, Any]:
+    return {w.mode: w for w in descendants(tab) if isinstance(w, ModeCard)}
+
+
+def _card_text(card: Any) -> str:
+    labels = [w for w in descendants(card) if isinstance(w, ctk.CTkLabel)]
+    return " ".join(label_text(w) for w in labels)
+
+
+def _strip_colours(strip: BlockStrip) -> list[str]:
+    return [item_option(strip, i, "fill") for i in strip.find_withtag("chip")]
+
+
+def _colours(tab: Any) -> tuple[list[str], dict[AesMode, list[str]]]:
+    """The colours of the plaintext's squares, and of each mode card's."""
+    strips = [w for w in descendants(tab) if isinstance(w, BlockStrip)]
+    (plaintext,) = [s for s in strips if not isinstance(s.master, ModeCard)]
+    cards = {
+        mode: _strip_colours(
+            next(w for w in descendants(card) if isinstance(w, BlockStrip))
+        )
+        for mode, card in _cards(tab).items()
+    }
+    return _strip_colours(plaintext), cards
+
+
+def test_each_card_gives_the_length_iv_and_tag(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC)  # 44 bytes: ECB and CBC pad them to 48
+
+    texts = {mode: _card_text(card) for mode, card in _cards(tab).items()}
+    assert "48 bytes (padded) · no IV" in texts[AesMode.ECB]
+    assert "48 bytes (padded) · IV " in texts[AesMode.CBC]
+    assert "44 bytes · counter " in texts[AesMode.CTR]
+    assert "44 bytes · IV " in texts[AesMode.GCM]
+    assert " · tag " in texts[AesMode.GCM]
+
+
+def test_only_ecb_repeats_the_plaintexts_pattern(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC, "YELLOW SUBMARINE" * 2 + "!")
+
+    plaintext, cards = _colours(tab)
+    require(
+        plaintext[0] == plaintext[1] != NEUTRAL == plaintext[2],
+        f"the two equal plaintext blocks are not marked: {plaintext}",
+    )
+    assert cards[AesMode.ECB] == plaintext
+    for mode in (AesMode.CBC, AesMode.CTR, AesMode.GCM):
+        assert set(cards[mode]) == {NEUTRAL}, mode
+
+
+def test_the_selected_modes_card_is_the_encryption_drawn_above(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC)
+    canvas = block_canvas(tab)
+    x0, y0, x1, y1 = canvas.bbox("iv&&box")
+    canvas.event_generate("<Button-1>", x=(x0 + x1) // 2, y=(y0 + y1) // 2)
+    drawn_iv = _details(tab).splitlines()[-1].strip()
+    require(len(drawn_iv) == 32, f"no IV in the details: {_details(tab)!r}")
+
+    cards = _cards(tab)
+    assert f"IV {drawn_iv[:6]}…" in _card_text(cards[AesMode.CBC])
+    marked = [mode for mode, card in cards.items() if "drawn above" in _card_text(card)]
+    assert marked == [AesMode.CBC]
 
 
 def _load_image(
