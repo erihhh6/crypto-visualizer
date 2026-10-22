@@ -9,17 +9,72 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+from dataclasses import dataclass
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
 
 from gui.palette import COLOUR_SURFACE
 from modules.aes_modes import encrypt_pixels_cbc, encrypt_pixels_ecb
 
+# Larger images are shrunk before they are encrypted: the pattern shows just
+# as well, and loading even a 24-megapixel photo then stays well under 0.2 s.
+MAX_ENCRYPTED_SIDE = 512
+SHOWN_SIDE = 150  # each view fits in a square this size (before HiDPI scaling)
+
+_SAMPLE = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "assets", "sample.bmp"
+)
+
+
+def fit_within(size: tuple[int, int], side: int) -> tuple[int, int]:
+    """The largest size with the same proportions that fits in a side×side square."""
+    width, height = size
+    scale = side / max(width, height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+@dataclass(frozen=True)
+class EcbViews:
+    """An image's pixels in the clear, encrypted with ECB, and with CBC."""
+
+    original: Image.Image
+    ecb: Image.Image
+    cbc: Image.Image
+    source_size: tuple[int, int]  # before any shrinking
+
+    @property
+    def shrunk(self) -> bool:
+        return self.original.size != self.source_size
+
+
+def encrypt_views(image: Image.Image, key: bytes) -> EcbViews:
+    """
+    Encrypt an image's raw RGB pixels with ECB and with CBC.
+
+    Pillow's tobytes()/frombytes() give the same pixel layout whatever the
+    file format, so the ciphertext can be shown as an image of the same size.
+    A large image is first shrunk with nearest-neighbour sampling, which keeps
+    areas of one colour exactly one colour; smoothing would blur them into
+    gradients and hide the very repetition that ECB leaks.
+    """
+    rgb = image.convert("RGB")
+    source_size = rgb.size
+    if max(rgb.size) > MAX_ENCRYPTED_SIDE:
+        smaller = fit_within(rgb.size, MAX_ENCRYPTED_SIDE)
+        rgb = rgb.resize(smaller, Image.Resampling.NEAREST)
+    pixels = rgb.tobytes()
+    return EcbViews(
+        original=rgb,
+        ecb=Image.frombytes("RGB", rgb.size, encrypt_pixels_ecb(pixels, key)),
+        cbc=Image.frombytes("RGB", rgb.size, encrypt_pixels_cbc(pixels, key)),
+        source_size=source_size,
+    )
+
 
 class ImageDemo(ctk.CTkFrame):
-    """Original, ECB-encrypted and CBC-encrypted views of a BMP, side by side."""
+    """Original, ECB-encrypted and CBC-encrypted views of an image, side by side."""
 
     def __init__(self, parent: tk.Widget, **kwargs: object) -> None:
         super().__init__(parent, **kwargs)
@@ -38,15 +93,15 @@ class ImageDemo(ctk.CTkFrame):
 
         ctk.CTkButton(
             hdr,
-            text="Load BMP",
-            command=self._load_image,
-            width=90,
+            text="Open image…",
+            command=self._open_image,
+            width=100,
         ).grid(row=0, column=1, padx=(4, 0))
 
         ctk.CTkButton(
             hdr,
             text="Use Sample",
-            command=self._use_sample_image,
+            command=lambda: self._show_ecb_demo(_SAMPLE),
             width=90,
             fg_color="#555",
         ).grid(row=0, column=2, padx=(4, 0))
@@ -54,8 +109,8 @@ class ImageDemo(ctk.CTkFrame):
         ctk.CTkLabel(
             self,
             text=(
-                "ECB leaks structure; CBC/CTR/GCM all produce noise — "
-                "only ECB vs CBC shown here."
+                "ECB leaks structure; CBC/CTR/GCM all produce noise — only ECB vs "
+                "CBC shown here.\nBest with flat colours: logos and drawings."
             ),
             font=("Courier New", 9),
             text_color="gray",
@@ -85,64 +140,42 @@ class ImageDemo(ctk.CTkFrame):
                 text_color="gray",
             ).grid(row=1, column=col, padx=4, pady=(0, 4))
 
-        self._tk_images: list[ImageTk.PhotoImage] = []  # keep references alive
+        self._size_note = ctk.CTkLabel(
+            img_frame, text="", font=("Courier New", 9), text_color="gray"
+        )
+        self._size_note.grid(row=2, column=0, columnspan=3, pady=(0, 4))
 
-    def _load_image(self) -> None:
+    def _open_image(self) -> None:
         path = filedialog.askopenfilename(
-            title="Select a BMP image",
-            filetypes=[("BMP Images", "*.bmp"), ("All files", "*.*")],
+            title="Open an image",
+            filetypes=[
+                ("Images", "*.png *.bmp *.gif *.jpg *.jpeg *.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
         )
         if path:
             self._show_ecb_demo(path)
 
-    def _use_sample_image(self) -> None:
-        sample = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "assets", "sample.bmp"
-        )
-        if os.path.exists(sample):
-            self._show_ecb_demo(sample)
-        else:
-            messagebox.showerror("File not found", f"Sample image not found:\n{sample}")
-
     def _show_ecb_demo(self, path: str) -> None:
-        """
-        Display Original / ECB-encrypted / CBC-encrypted views of a BMP.
-
-        Uses PIL tobytes() / frombytes() so this works for any BMP variant
-        (24-bit, 32-bit, BGR, palette-indexed, top/bottom row order, etc.).
-        The raw pixel bytes are always in PIL's normalized RGB format, so
-        the encrypted result can be reconstructed without format guesswork.
-        """
+        """Show the original, ECB-encrypted and CBC-encrypted views of an image."""
         try:
-            key = os.urandom(16)
+            with Image.open(path) as image:
+                views = encrypt_views(image, os.urandom(16))
+        except (OSError, Image.DecompressionBombError) as exc:
+            # OSError covers a missing file and one Pillow cannot read.
+            messagebox.showerror("Cannot open image", f"{path}\n\n{exc}")
+            return
 
-            # Normalize to RGB via PIL — works regardless of BMP subformat
-            orig_img = Image.open(path).convert("RGB")
-            raw_pixels = orig_img.tobytes()  # pure RGB, no BMP header complications
+        shown = fit_within(views.original.size, SHOWN_SIDE)
+        for label, view in zip(
+            self._img_labels, (views.original, views.ecb, views.cbc), strict=True
+        ):
+            # CTkImage, unlike a Tk PhotoImage, scales with the display's DPI.
+            label.configure(image=ctk.CTkImage(light_image=view, size=shown))
 
-            # ECB: identical 16-byte blocks → identical ciphertext → patterns survive
-            ecb_raw = encrypt_pixels_ecb(raw_pixels, key)
-            ecb_img = Image.frombytes("RGB", orig_img.size, ecb_raw)
-
-            # CBC: every block XOR'd with previous → looks like random noise
-            cbc_raw = encrypt_pixels_cbc(raw_pixels, key)
-            cbc_img = Image.frombytes("RGB", orig_img.size, cbc_raw)
-
-            # Resize to fit the display panel (keep aspect ratio)
-            target_w = 150
-            target_h = int(orig_img.height * target_w / orig_img.width)
-            lanczos = Image.Resampling.LANCZOS
-            orig_r = orig_img.resize((target_w, target_h), lanczos)
-            ecb_r = ecb_img.resize((target_w, target_h), lanczos)
-            cbc_r = cbc_img.resize((target_w, target_h), lanczos)
-
-            self._tk_images = [
-                ImageTk.PhotoImage(orig_r),
-                ImageTk.PhotoImage(ecb_r),
-                ImageTk.PhotoImage(cbc_r),
-            ]
-            for i, lbl in enumerate(self._img_labels):
-                lbl.configure(image=self._tk_images[i])
-
-        except Exception as exc:
-            messagebox.showerror("Image error", str(exc))
+        width, height = views.original.size
+        note = f"{width}×{height} pixels encrypted"
+        if views.shrunk:
+            source_width, source_height = views.source_size
+            note += f" (shrunk from {source_width}×{source_height})"
+        self._size_note.configure(text=note)

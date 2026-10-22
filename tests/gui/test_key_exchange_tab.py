@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from typing import Any
 
@@ -145,12 +146,17 @@ def fast_autoplay(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_play_reveals_every_step_then_stops(tab: Any) -> None:
     find_button(tab, "Run ECDH").invoke()
 
-    find_button(tab, "Play").invoke()
-    pump(tab, 400)
+    play = find_button(tab, "Play")
+
+    play.invoke()
+    # Wait for the end, not a fixed time: a slow CI runner once needed more.
+    deadline = time.monotonic() + 10
+    while play.cget("text") != "Play ▶":  # it stops by itself at the end
+        require(time.monotonic() < deadline, "autoplay still running after 10 s")
+        pump(tab, 20)
 
     assert _shown(tab) == [1, 2, 3, 4, 5, 6]
     assert _current(tab) == [6]
-    assert find_button(tab, "Play").cget("text") == "Play ▶"  # stopped by itself
 
 
 def test_pressing_prev_pauses_the_autoplay(

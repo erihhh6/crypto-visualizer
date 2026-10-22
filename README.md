@@ -15,7 +15,7 @@
 - **AES Modes** — ECB, CBC, CTR, GCM drawn as per-block data flow (IV and CBC chaining, counters and keystream, the GCM tag), with hover tooltips and click-to-inspect
 - **Mode comparison** — one message and key through all four modes; equal 16-byte blocks share a colour, so ECB's repeated blocks stand out, and each mode's length, IV/counter and tag are listed
 - **Tamper Lab** — decrypt with wrong keys (one, or 20,000 to measure the padding check's ~1-in-255 false accepts) and edit a message without the key by XORing its ciphertext: CTR applies the edit exactly, CBC garbles the block before, ECB only garbles, GCM refuses
-- **ECB Penguin Attack** — load any BMP image and see why ECB mode is dangerous (structural patterns survive encryption)
+- **ECB Penguin Attack** — open any image (PNG, JPEG, BMP, …) and see why ECB mode is dangerous: structural patterns survive encryption. Large images are shrunk to 512 px first, and the views scale with the display's DPI
 - **Key Exchange** — Diffie-Hellman (3072-bit RFC 3526 group 15 by default, which matches P-256's 128-bit security, or 2048-bit group 14) and ECDH (SECP256R1), told one step at a time (Next/Prev, ←/→ keys or autoplay), both ending with an AES-256 key derived by HKDF-SHA256; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
 
@@ -67,7 +67,7 @@ failures) until the commit that fixes them removes the marker.
 | AES-CBC | Each block XOR'd with previous ciphertext — patterns disappear | NIST SP 800-38A |
 | AES-CTR | Stream cipher mode; no padding needed; parallelisable | NIST SP 800-38A |
 | AES-GCM | Authenticated encryption; includes 128-bit integrity tag | NIST SP 800-38D |
-| ECB Penguin Attack | Encrypting a BMP pixel-by-pixel in ECB preserves visual structure | Schneier, *Applied Cryptography* |
+| ECB Penguin Attack | Encrypting an image's pixels with ECB preserves its visual structure | Schneier, *Applied Cryptography* |
 | Diffie-Hellman | Public/private value exchange; shared secret via modular exponentiation | RFC 3526 |
 | ECDH | Same idea on an elliptic curve; much smaller keys for same security | RFC 8422 |
 | Key size equivalence | 256-bit ECDH ≈ 3072-bit DH ≈ 128-bit symmetric security | NIST SP 800-57 Table 2 |

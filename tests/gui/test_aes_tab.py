@@ -24,7 +24,6 @@ from tests.gui.helpers import (
     pump,
     require,
 )
-from tests.markers import known_bug
 
 _MESSAGE = "Attack at dawn - more than one 16-byte block"
 _RIGHT_KEY = bytes(16)
@@ -262,14 +261,12 @@ def test_the_selected_modes_card_is_the_encryption_drawn_above(tab: Any) -> None
 def _load_image(
     tab: Any, root: Any, monkeypatch: pytest.MonkeyPatch, path: Path
 ) -> None:
-    """Click "Load BMP" and pick *path* in the (stubbed) file dialog."""
+    """Click "Open image…" and pick *path* in the (stubbed) file dialog."""
     monkeypatch.setattr(filedialog, "askopenfilename", lambda **_: str(path))
-    find_button(tab, "Load BMP").invoke()
+    find_button(tab, "Open image").invoke()
     pump(root)
 
 
-@known_bug("the image demo gives CTkLabel Tk PhotoImages, which ignore HiDPI scaling")
-@pytest.mark.filterwarnings("ignore:CTkLabel Warning:UserWarning")
 def test_image_demo_uses_dpi_aware_images(
     tab: Any, root: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -286,10 +283,6 @@ def test_image_demo_uses_dpi_aware_images(
     assert all(isinstance(image, ctk.CTkImage) for image in shown)
 
 
-# The PhotoImage warning is the HiDPI bug above; ignoring it here keeps this
-# test about size only.
-@known_bug("images are scaled to a fixed width only, so tall ones overflow the tab")
-@pytest.mark.filterwarnings("ignore:CTkLabel Warning:UserWarning")
 def test_loaded_image_fits_inside_the_tab(
     tab: Any, root: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -304,3 +297,48 @@ def test_loaded_image_fits_inside_the_tab(
         assert height <= tab.winfo_height(), (
             f"{height}px image in a {tab.winfo_height()}px tab"
         )
+
+
+def _size_note(tab: Any) -> str:
+    notes = [
+        label_text(w)
+        for w in descendants(tab)
+        if isinstance(w, ctk.CTkLabel) and "pixels encrypted" in label_text(w)
+    ]
+    require(len(notes) == 1, f"expected one size note, found {notes}")
+    return notes[0]
+
+
+def test_a_large_image_is_shrunk_and_says_so(
+    tab: Any, root: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    large = tmp_path / "large.png"
+    Image.new("RGB", (1200, 800), "white").save(large)
+
+    _load_image(tab, root, monkeypatch, large)
+
+    assert _size_note(tab) == "512×341 pixels encrypted (shrunk from 1200×800)"
+
+
+def test_the_sample_image_is_shown_at_full_size(tab: Any, root: Any) -> None:
+    find_button(tab, "Use Sample").invoke()
+    pump(root)
+
+    assert _size_note(tab) == "200×200 pixels encrypted"
+
+
+def test_an_unreadable_file_is_explained(
+    tab: Any,
+    root: Any,
+    no_dialogs: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    not_an_image = tmp_path / "notes.png"
+    not_an_image.write_text("just text")
+
+    _load_image(tab, root, monkeypatch, not_an_image)
+
+    assert len(no_dialogs) == 1
+    assert no_dialogs[0].startswith("showerror: Cannot open image")
+    no_dialogs.clear()  # the explanation was the expected outcome
