@@ -18,7 +18,18 @@ from typing import NamedTuple
 
 import customtkinter as ctk
 
-from gui.palette import COLOUR_PANEL
+from gui.palette import (
+    GREEN,
+    MODE_COLOURS,
+    MUTED,
+    ORANGE,
+    PANEL,
+    RED,
+    TEXT,
+    Colour,
+    follow_appearance,
+    resolve,
+)
 from modules.aes_modes import AesMode, encrypt
 from modules.tamper import (
     PADDING_FALSE_ACCEPT_RATE,
@@ -33,15 +44,10 @@ from modules.tamper import (
 
 WRONG_KEY_TRIALS = 20_000  # about 0.4 s for all four modes
 
-_MODE_COLOURS = {
-    AesMode.ECB: "#E07B39",
-    AesMode.CBC: "#5B9BD5",
-    AesMode.CTR: "#5BAD72",
-    AesMode.GCM: "#9B59B6",
-}
-_SAFE = "#27AE60"  # the receiver noticed
-_UNSAFE = "#E74C3C"  # wrong data accepted without a word
-_DAMAGED = "#E67E22"  # garbage accepted, but not the attacker's text
+_SAFE = GREEN  # the receiver noticed
+_UNSAFE = RED  # wrong data accepted without a word
+_DAMAGED = ORANGE  # garbage accepted, but not the attacker's text
+_CHANGED: Colour = ("#F5B7B1", "#922B21")  # behind characters that differ
 
 _WRONG_KEY_NOTES = {
     AesMode.ECB: "Only the padding check can notice; about 1 wrong key in 255 passes.",
@@ -76,7 +82,7 @@ class OutcomeCard(ctk.CTkFrame):
     """One mode's result: a verdict, what the receiver got, and why."""
 
     def __init__(self, parent: tk.Widget, mode: AesMode, **kwargs: object) -> None:
-        super().__init__(parent, fg_color=COLOUR_PANEL, **kwargs)
+        super().__init__(parent, fg_color=PANEL, **kwargs)
         self.mode = mode
         self.grid_columnconfigure(0, weight=1)
 
@@ -84,7 +90,7 @@ class OutcomeCard(ctk.CTkFrame):
             self,
             text=mode,
             font=ctk.CTkFont(family="Courier New", size=12, weight="bold"),
-            text_color=_MODE_COLOURS[mode],
+            text_color=MODE_COLOURS[mode],
         ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
         self._verdict = ctk.CTkLabel(
             self,
@@ -101,32 +107,35 @@ class OutcomeCard(ctk.CTkFrame):
             height=2,
             wrap="char",
             font=("Courier New", 10),
-            background=COLOUR_PANEL,
-            foreground="#E0E0E0",
             relief="flat",
             bd=0,
             state="disabled",
             cursor="arrow",
         )
-        self._received.tag_configure("changed", background="#922B21")
-        self._received.tag_configure("dim", foreground="gray")
         self._received.grid(row=2, column=0, sticky="ew", padx=8, pady=2)
+        follow_appearance(self._received, self._restyle_received)
 
         self._note = ctk.CTkLabel(
             self,
             text="",
             font=("Courier New", 9),
-            text_color="gray",
+            text_color=MUTED,
             justify="left",
             anchor="w",
             wraplength=230,
         )
         self._note.grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
 
+    def _restyle_received(self) -> None:
+        text = self._received
+        text.configure(background=resolve(PANEL), foreground=resolve(TEXT))
+        text.tag_configure("changed", background=resolve(_CHANGED))
+        text.tag_configure("dim", foreground=resolve(MUTED))
+
     def show(
         self,
         verdict: str,
-        colour: str,
+        colour: Colour,
         note: str,
         received: bytes | None = None,
         original: bytes = b"",
@@ -174,7 +183,7 @@ class TamperTab(ctk.CTkFrame):
             controls,
             text="Each run encrypts it under a fresh random AES-128 key.",
             font=("Courier New", 9),
-            text_color="gray",
+            text_color=MUTED,
         ).grid(row=0, column=2, padx=(4, 8))
 
         wrong = self._section(
@@ -201,7 +210,10 @@ class TamperTab(ctk.CTkFrame):
         self._old = tk.StringVar(value="100")
         ctk.CTkEntry(edit.header, textvariable=self._old, width=80).pack(side="left")
         ctk.CTkLabel(edit.header, text="with").pack(side="left", padx=4)
-        self._new = tk.StringVar(value="900")
+        # Every character changes: ECB's garbage then matches the edit by
+        # chance once in 16.7 million runs. With "900" (one changed byte) it
+        # was once in 256, and ECB sometimes seemed to accept the edit.
+        self._new = tk.StringVar(value="999")
         ctk.CTkEntry(edit.header, textvariable=self._new, width=80).pack(side="left")
         ctk.CTkButton(
             edit.header, text="Tamper ▶", width=100, command=self._tamper
@@ -229,9 +241,9 @@ class TamperTab(ctk.CTkFrame):
         ctk.CTkLabel(header, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(
             side="left", padx=(0, 8)
         )
-        ctk.CTkLabel(
-            header, text=hint, font=("Courier New", 9), text_color="gray"
-        ).pack(side="right")
+        ctk.CTkLabel(header, text=hint, font=("Courier New", 9), text_color=MUTED).pack(
+            side="right"
+        )
 
         cards = {}
         for col, mode in enumerate(AesMode):

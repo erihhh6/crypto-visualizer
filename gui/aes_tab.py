@@ -18,6 +18,7 @@ import customtkinter as ctk
 from gui.block_canvas import BlockPanel
 from gui.image_demo import ImageDemo
 from gui.mode_comparison import ModeComparison
+from gui.palette import BUTTON_PRIMARY, BUTTON_SECONDARY
 from modules.aes_modes import (
     AesMode,
     AuthenticationError,
@@ -96,7 +97,7 @@ class AESTab(ctk.CTkFrame):
             text="Encrypt ▶",
             command=self._do_encrypt,
             width=110,
-            fg_color="#2E86AB",
+            fg_color=BUTTON_PRIMARY,
         )
         self._enc_btn.grid(row=0, column=6, padx=4, pady=6)
 
@@ -105,7 +106,7 @@ class AESTab(ctk.CTkFrame):
             text="◀ Decrypt",
             command=self._do_decrypt,
             width=110,
-            fg_color="#5C6BC0",
+            fg_color=BUTTON_SECONDARY,
         )
         self._dec_btn.grid(row=0, column=7, padx=(4, 8), pady=6)
 

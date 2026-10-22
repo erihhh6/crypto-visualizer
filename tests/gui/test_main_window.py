@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from tests.gui.helpers import require, run_app_script
 
 _START = """
@@ -64,23 +66,37 @@ app.mainloop()
 watchdog.cancel()
 """
 
-# 2:1 is far below WCAG AA (4.5:1 for body text): this only catches text that
-# is effectively invisible. Raise the bar once the app has a real light theme.
-_MIN_CONTRAST = 2.0
+_MIN_CONTRAST = 4.5  # WCAG 2 AA for normal text
 
-_LIGHT_OS_CONTRAST = f"""
+# Fills every tab, so the text that only appears after using it is checked too.
+_CONTRAST = """
 import json
+import sys
 import darkdetect
-darkdetect.theme = lambda: "Light"  # an OS in light mode, before the app reads it
+darkdetect.theme = lambda: sys.argv[1]  # the OS theme, before the app reads it
 
+import customtkinter as ctk
 from gui.main_window import MainWindow
-from tests.gui.helpers import find_button, low_contrast_labels, pump
+from tests.gui.helpers import (
+    block_canvas, click_block, descendants, find_button, low_contrast_text, pump
+)
 
 app = MainWindow()
 pump(app)
-find_button(app, "Run DH").invoke()  # the step cards only exist once a run starts
+plaintext = next(w for w in descendants(app.aes_tab) if isinstance(w, ctk.CTkEntry))
+plaintext.delete(0, "end")
+plaintext.insert(0, "YELLOW SUBMARINE" * 2)  # repeated blocks: coloured squares
+find_button(app.aes_tab, "Encrypt").invoke()
 pump(app)
-print(json.dumps(low_contrast_labels(app, minimum={_MIN_CONTRAST})))
+click_block(block_canvas(app.aes_tab), 1)
+find_button(app.aes_tab, "Use Sample").invoke()
+find_button(app.key_tab, "Run DH").invoke()
+for _ in range(5):
+    find_button(app.key_tab, "Next").invoke()
+find_button(app.tamper_tab, "One wrong key").invoke()
+find_button(app.tamper_tab, "Tamper").invoke()
+pump(app, 300)
+print(json.dumps([ctk.get_appearance_mode(), low_contrast_text(app, MINIMUM)]))
 app.destroy()
 """
 
@@ -123,11 +139,15 @@ def test_closing_the_window_ends_the_process() -> None:
     )
 
 
-def test_text_stays_readable_on_a_light_mode_os() -> None:
-    result = run_app_script(_LIGHT_OS_CONTRAST)
+@pytest.mark.parametrize("os_theme", ["Light", "Dark"])
+def test_the_app_follows_the_os_theme_with_readable_text(os_theme: str) -> None:
+    script = _CONTRAST.replace("MINIMUM", str(_MIN_CONTRAST))
+
+    result = run_app_script(script, os_theme)
 
     require(result.returncode == 0, f"app crashed:\n{result.stderr}")
-    offenders = json.loads(result.stdout.strip().splitlines()[-1])
+    mode, offenders = json.loads(result.stdout.strip().splitlines()[-1])
+    assert mode == os_theme
     assert offenders == [], f"text below {_MIN_CONTRAST}:1 contrast:\n" + "\n".join(
         offenders
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
 from typing import Any, NamedTuple
@@ -13,6 +14,7 @@ from PIL import Image
 
 from gui.aes_tab import AESTab
 from gui.mode_comparison import NEUTRAL, BlockStrip, ModeCard
+from gui.palette import PANEL, TEXT, resolve
 from modules.aes_modes import AesMode, PaddingError, decrypt, encrypt
 from tests.gui.helpers import (
     block_canvas,
@@ -178,6 +180,19 @@ def test_clicking_a_block_shows_its_details(tab: Any) -> None:
     assert _MESSAGE.encode()[16:32].hex().upper() in details
 
 
+def test_the_details_box_follows_the_theme(
+    tab: Any, switch_appearance: Callable[[str], None]
+) -> None:
+    (details,) = [w for w in descendants(tab) if isinstance(w, tk.Text)]
+
+    for mode, colour in (("Dark", 1), ("Light", 0)):
+        switch_appearance(mode)
+        assert (details["background"], details["foreground"]) == (
+            PANEL[colour],
+            TEXT[colour],
+        )
+
+
 def test_encrypting_again_clears_the_block_details(tab: Any) -> None:
     _encrypt(tab, AesMode.CBC)
     placeholder = _details(tab)
@@ -236,12 +251,12 @@ def test_only_ecb_repeats_the_plaintexts_pattern(tab: Any) -> None:
 
     plaintext, cards = _colours(tab)
     require(
-        plaintext[0] == plaintext[1] != NEUTRAL == plaintext[2],
+        plaintext[0] == plaintext[1] != resolve(NEUTRAL) == plaintext[2],
         f"the two equal plaintext blocks are not marked: {plaintext}",
     )
     assert cards[AesMode.ECB] == plaintext
     for mode in (AesMode.CBC, AesMode.CTR, AesMode.GCM):
-        assert set(cards[mode]) == {NEUTRAL}, mode
+        assert set(cards[mode]) == {resolve(NEUTRAL)}, mode
 
 
 def test_the_selected_modes_card_is_the_encryption_drawn_above(tab: Any) -> None:

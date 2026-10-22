@@ -20,7 +20,22 @@ from dataclasses import dataclass
 
 import customtkinter as ctk
 
-from gui.palette import COLOUR_PANEL, COLOUR_SURFACE
+from gui.palette import (
+    FILL_BLUE,
+    FILL_BRONZE,
+    FILL_GREEN,
+    FILL_ORANGE,
+    FILL_PURPLE,
+    FILL_RED,
+    FILL_SLATE,
+    LINE,
+    MUTED,
+    PANEL,
+    SURFACE,
+    TEXT,
+    follow_appearance,
+    resolve,
+)
 from gui.tooltip import Tooltip
 from modules.aes_modes import (
     AesMode,
@@ -29,15 +44,17 @@ from modules.aes_modes import (
     gcm_pre_counter_block,
 )
 
-COLOUR_PT = "#5B9BD5"  # plaintext       → blue
-COLOUR_CT = "#E07B39"  # ciphertext      → orange
-COLOUR_IV = "#5BAD72"  # IV, AES input, counters → green
-COLOUR_KS = "#8E6CC0"  # keystream       → purple
-COLOUR_TAG = "#9A7B2F"  # GCM tag        → bronze
-COLOUR_OP = "#3A3A50"  # AES boxes
-COLOUR_SEL = "#C0392B"  # selected        → red outline
-COLOUR_DIM = "#AAAAAA"  # captions and row headers
-ARROW_COLOR = "#888888"
+# Value boxes carry white text, so their fills are the same in both modes:
+# plaintext blue, IV/AES input/counters green, keystream purple, ciphertext
+# orange, GCM tag bronze. Each border is a darker shade of its fill.
+_BORDERS = {
+    FILL_BLUE: "#1E4F82",
+    FILL_GREEN: "#1E5A32",
+    FILL_PURPLE: "#4D3578",
+    FILL_ORANGE: "#7C3A12",
+    FILL_BRONZE: "#5A4515",
+}
+COLOUR_SEL = FILL_RED  # the selected item's border
 
 LANE_W = 84  # row headers (and the CBC IV) left of the first block
 BLOCK_W = 130  # value box width
@@ -70,7 +87,6 @@ class _Row:
     tag: str  # canvas tag of the row's items, e.g. "counter"
     header: str  # shown in the lane on the left
     fill: str
-    outline: str
     value: Callable[[Block], bytes]
     # Counters only change at the end: show the end, or every box looks alike.
     keep_end: bool = False
@@ -82,15 +98,11 @@ def _keystream(blk: Block) -> bytes:
     return blk.keystream
 
 
-_PLAINTEXT = _Row("plaintext", "Plaintext", COLOUR_PT, "#3A79B0", lambda b: b.plaintext)
-_AES_INPUT = _Row("aes_input", "AES input", COLOUR_IV, "#3A8F58", lambda b: b.aes_input)
-_COUNTER = _Row(
-    "counter", "Counter", COLOUR_IV, "#3A8F58", lambda b: b.aes_input, keep_end=True
-)
-_KEYSTREAM = _Row("keystream", "Keystream", COLOUR_KS, "#6A4C98", _keystream)
-_CIPHERTEXT = _Row(
-    "ciphertext", "Ciphertext", COLOUR_CT, "#B05A20", lambda b: b.ciphertext
-)
+_PLAINTEXT = _Row("plaintext", "Plaintext", FILL_BLUE, lambda b: b.plaintext)
+_AES_INPUT = _Row("aes_input", "AES input", FILL_GREEN, lambda b: b.aes_input)
+_COUNTER = _Row("counter", "Counter", FILL_GREEN, lambda b: b.aes_input, keep_end=True)
+_KEYSTREAM = _Row("keystream", "Keystream", FILL_PURPLE, _keystream)
+_CIPHERTEXT = _Row("ciphertext", "Ciphertext", FILL_ORANGE, lambda b: b.ciphertext)
 
 # Top to bottom. Plaintext is always on top and ciphertext at the bottom, so
 # the modes are easy to compare.
@@ -176,11 +188,7 @@ class BlockCanvas(ctk.CTkFrame):
 
         # Not "_canvas": CTkFrame keeps its own background canvas under that
         # name, and overwriting it made every theme change repaint this one.
-        self._surface = tk.Canvas(
-            self,
-            background=COLOUR_SURFACE,
-            highlightthickness=0,
-        )
+        self._surface = tk.Canvas(self, highlightthickness=0)
         self._surface.grid(row=0, column=0, sticky="nsew")
 
         self._hscroll = ctk.CTkScrollbar(
@@ -191,6 +199,7 @@ class BlockCanvas(ctk.CTkFrame):
 
         self._tooltip = Tooltip(self._surface)
         self._on_select = on_select
+        self._result: EncryptionResult | None = None
         self._items: list[_Item] = []
         # Each rectangle's own (outline, width), restored when it is deselected.
         self._normal_borders: dict[int, tuple[str, int]] = {}
@@ -199,8 +208,23 @@ class BlockCanvas(ctk.CTkFrame):
         self._surface.bind("<Motion>", self._on_motion)
         self._surface.bind("<Leave>", lambda _e: self._tooltip.hide())
         self._surface.bind("<Button-1>", self._on_click)
+        follow_appearance(self._surface, self._restyle)
+
+    def _restyle(self) -> None:
+        """Repaint in the current light/dark colours, keeping view and selection."""
+        self._surface.configure(background=resolve(SURFACE))
+        if self._result is None:
+            return
+        scrolled = self._surface.xview()[0]
+        selected = self._selected.title if self._selected else None
+        self.draw(self._result)
+        self._surface.xview_moveto(scrolled)
+        for item in self._items:
+            if item.title == selected:
+                self._select(item)
 
     def draw(self, result: EncryptionResult) -> None:
+        self._result = result
         self._surface.delete("all")
         self._surface.xview_moveto(0)
         self._items = []
@@ -219,7 +243,7 @@ class BlockCanvas(ctk.CTkFrame):
                 text=row.header,
                 anchor="e",
                 font=("Courier New", 8),
-                fill=COLOUR_DIM,
+                fill=resolve(MUTED),
                 tags=("header",),
             )
         for blk in shown:
@@ -251,7 +275,6 @@ class BlockCanvas(ctk.CTkFrame):
                 row_index,
                 _abbreviate(_hex(row.value(blk)), keep_end=row.keep_end),
                 row.fill,
-                row.outline,
                 (*tags, row.tag),
             )
             for row_index, row in enumerate(rows)
@@ -305,7 +328,7 @@ class BlockCanvas(ctk.CTkFrame):
             raise ValueError("CBC result without an IV")
         tags = ("iv",)
         y = _band_middle(0)
-        rect = self._rect(8, y - 10, LANE_W - 8, y + 10, COLOUR_IV, "#3A8F58", tags)
+        rect = self._rect(8, y - 10, LANE_W - 8, y + 10, FILL_GREEN, tags)
         self._surface.create_text(
             LANE_W // 2,
             y,
@@ -341,14 +364,12 @@ class BlockCanvas(ctk.CTkFrame):
         tags = ("tag",)
         self._caption(x0, "Tag", tags)
         j0_rect = self._box(
-            x0, 1, _abbreviate(_hex(j0), keep_end=True), COLOUR_IV, "#3A8F58", tags
+            x0, 1, _abbreviate(_hex(j0), keep_end=True), FILL_GREEN, tags
         )
         self._aes_arrow(cx, _row_bottom(1), _band_middle(2) - XOR_R, tags)
         self._xor_node(cx, _band_middle(2), tags)
         self._arrow((cx, _band_middle(2) + XOR_R), (cx, _row_top(3)), tags=tags)
-        tag_rect = self._box(
-            x0, 3, _abbreviate(_hex(result.tag)), COLOUR_TAG, "#6E5520", tags
-        )
+        tag_rect = self._box(x0, 3, _abbreviate(_hex(result.tag)), FILL_BRONZE, tags)
 
         # GHASH covers every ciphertext block; the arrow leaves the last one.
         gap = x0 - BLOCK_GAP // 2
@@ -364,7 +385,7 @@ class BlockCanvas(ctk.CTkFrame):
             _band_middle(2) - 9,
             text="GHASH",
             font=("Courier New", 7),
-            fill=COLOUR_DIM,
+            fill=resolve(MUTED),
             tags=("ghash",),
         )
 
@@ -385,7 +406,7 @@ class BlockCanvas(ctk.CTkFrame):
             text=f"Showing the first\n{shown} of {total} blocks",
             justify="center",
             font=("Courier New", 8),
-            fill=COLOUR_DIM,
+            fill=resolve(MUTED),
             tags=("overflow",),
         )
 
@@ -399,7 +420,7 @@ class BlockCanvas(ctk.CTkFrame):
             TOP - 12,
             text=text,
             font=("Courier New", 8),
-            fill=COLOUR_DIM,
+            fill=resolve(MUTED),
             tags=tags,
         )
 
@@ -410,11 +431,10 @@ class BlockCanvas(ctk.CTkFrame):
         x1: int,
         y1: int,
         fill: str,
-        outline: str,
         tags: tuple[str, ...],
     ) -> int:
         """Draw a value box and remember its normal border."""
-        width = 2
+        outline, width = _BORDERS[fill], 2
         rect = self._surface.create_rectangle(
             x0,
             y0,
@@ -434,13 +454,10 @@ class BlockCanvas(ctk.CTkFrame):
         row: int,
         text: str,
         fill: str,
-        outline: str,
         tags: tuple[str, ...],
     ) -> int:
         """A full-width value box in *row* of the column at *x0*."""
-        rect = self._rect(
-            x0, _row_top(row), x0 + BLOCK_W, _row_bottom(row), fill, outline, tags
-        )
+        rect = self._rect(x0, _row_top(row), x0 + BLOCK_W, _row_bottom(row), fill, tags)
         self._surface.create_text(
             x0 + BLOCK_W // 2,
             _row_middle(row),
@@ -453,7 +470,7 @@ class BlockCanvas(ctk.CTkFrame):
 
     def _arrow(self, *points: tuple[int, int], tags: tuple[str, ...]) -> None:
         self._surface.create_line(
-            *points, fill=ARROW_COLOR, width=2, arrow=tk.LAST, tags=tags
+            *points, fill=resolve(LINE), width=2, arrow=tk.LAST, tags=tags
         )
 
     def _aes_arrow(self, cx: int, y0: int, y1: int, tags: tuple[str, ...]) -> None:
@@ -465,8 +482,8 @@ class BlockCanvas(ctk.CTkFrame):
             y - 8,
             cx + 18,
             y + 8,
-            fill=COLOUR_OP,
-            outline=ARROW_COLOR,
+            fill=FILL_SLATE,
+            outline=resolve(LINE),
             tags=(*tags, "aes"),
         )
         self._surface.create_text(
@@ -486,13 +503,15 @@ class BlockCanvas(ctk.CTkFrame):
             cy - r,
             cx + r,
             cy + r,
-            fill=COLOUR_SURFACE,
-            outline=ARROW_COLOR,
+            fill=resolve(SURFACE),
+            outline=resolve(LINE),
             width=2,
             tags=xor_tags,
         )
         for points in ((cx - r, cy, cx + r, cy), (cx, cy - r, cx, cy + r)):
-            self._surface.create_line(*points, fill=ARROW_COLOR, width=2, tags=xor_tags)
+            self._surface.create_line(
+                *points, fill=resolve(LINE), width=2, tags=xor_tags
+            )
 
     def _xor_between(self, cx: int, row: int, tags: tuple[str, ...]) -> None:
         """A ⊕ in the band below *row*, on the way down to the next row."""
@@ -570,7 +589,7 @@ class BlockPanel(ctk.CTkFrame):
 
         # Details below the canvas: a fixed-height box of text that scrolls,
         # so every row of a block stays reachable.
-        detail_frame = ctk.CTkFrame(self, height=115)
+        detail_frame = ctk.CTkFrame(self, height=115, fg_color=PANEL)
         detail_frame.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 4))
         detail_frame.grid_columnconfigure(0, weight=1)
         detail_frame.grid_rowconfigure(0, weight=1)
@@ -579,8 +598,6 @@ class BlockPanel(ctk.CTkFrame):
         self._details = tk.Text(
             detail_frame,
             font=("Courier New", 10),
-            background=COLOUR_PANEL,
-            foreground="#E0E0E0",
             relief="flat",
             bd=0,
             wrap="word",
@@ -589,7 +606,11 @@ class BlockPanel(ctk.CTkFrame):
             cursor="arrow",
         )
         self._details.grid(row=0, column=0, sticky="nsew", padx=6, pady=4)
+        follow_appearance(self._details, self._restyle_details)
         self._show_details(_DETAILS_PLACEHOLDER)
+
+    def _restyle_details(self) -> None:
+        self._details.configure(background=resolve(PANEL), foreground=resolve(TEXT))
 
     def draw(self, result: EncryptionResult) -> None:
         self._block_canvas.draw(result)

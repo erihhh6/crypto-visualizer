@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import time
 import tkinter as tk
+from collections.abc import Callable
 from typing import Any
 
 import customtkinter as ctk
 import pytest
+from matplotlib.colors import to_rgba
 
 from gui.exchange_plot import ExchangePlot
-from gui.key_exchange_tab import CURRENT_CARD_BG, KeyExchangeTab, StepCard
+from gui.key_exchange_tab import KeyExchangeTab, StepCard
+from gui.palette import CURRENT_CARD, SURFACE, TEXT
 from modules.key_exchange import Point
 from modules.toy_curve import TOY_CURVE, TOY_GENERATOR, TOY_ORDER
 from tests.gui.helpers import descendants, find_button, label_text, pump, require
@@ -63,7 +66,7 @@ def _current(tab: Any) -> list[int]:
     return [
         n
         for n, card in enumerate(_cards(tab), start=1)
-        if card.cget("fg_color") == CURRENT_CARD_BG
+        if card.cget("fg_color") == CURRENT_CARD
     ]
 
 
@@ -297,6 +300,21 @@ def test_the_plotted_exchange_is_real_ecdh(tab: Any) -> None:
         k for k in range(1, TOY_ORDER) if TOY_CURVE.multiply(k, TOY_GENERATOR) == qa
     )
     assert s == TOY_CURVE.multiply(alice_private, qb)
+
+
+@pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])
+def test_the_plot_follows_the_theme(
+    tab: Any, protocol: str, switch_appearance: Callable[[str], None]
+) -> None:
+    find_button(tab, protocol).invoke()
+    shown = sorted(_plotted(tab))  # the current view, before any switch
+
+    for mode, colour in (("Dark", 1), ("Light", 0)):
+        switch_appearance(mode)
+        figure = _plot(tab).figure
+        assert figure.get_facecolor() == to_rgba(SURFACE[colour])
+        assert figure.axes[0].title.get_color() == TEXT[colour]
+        assert sorted(_plotted(tab)) == shown  # the same view, repainted
 
 
 def test_dh_shows_the_message_flow_instead_of_the_curve(tab: Any) -> None:

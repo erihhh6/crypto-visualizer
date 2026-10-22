@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 import customtkinter as ctk
 import pytest
 
+from gui.palette import MUTED, PANEL, TEXT
 from gui.tamper_tab import WRONG_KEY_TRIALS, OutcomeCard, TamperTab
 from modules.aes_modes import AesMode
 from tests.gui.helpers import descendants, find_button, label_text, pump, require
@@ -74,8 +76,9 @@ def test_only_the_changed_characters_are_highlighted(tab: Any) -> None:
 
     _, edits = _cards(tab)
     ctr = edits[AesMode.CTR]
-    assert ctr.received == "Transfer from Alice to Bob: 900 EUR"
-    assert ctr.highlighted == [ctr.received.index("900")]  # only the 1 became a 9
+    assert ctr.received == "Transfer from Alice to Bob: 999 EUR"
+    start = ctr.received.index("999")
+    assert ctr.highlighted == [start, start + 1, start + 2]  # just "100" → "999"
     assert edits[AesMode.GCM].highlighted == []
 
 
@@ -98,6 +101,20 @@ def test_many_wrong_keys(tab: Any) -> None:
     assert wrong_keys[AesMode.GCM].verdict == f"0 of {trials} accepted"
     assert wrong_keys[AesMode.GCM].received == "not one"
     assert "padding predicts 1 in 255" in wrong_keys[AesMode.ECB].received
+
+
+def test_the_received_text_follows_the_theme(
+    tab: Any, switch_appearance: Callable[[str], None]
+) -> None:
+    boxes = [w for w in descendants(tab) if isinstance(w, tk.Text)]
+    require(len(boxes) == 8, f"expected 8 text boxes, found {len(boxes)}")
+
+    for mode, colour in (("Dark", 1), ("Light", 0)):
+        switch_appearance(mode)
+        assert {(b["background"], b["foreground"]) for b in boxes} == {
+            (PANEL[colour], TEXT[colour])
+        }
+        assert {b.tag_cget("dim", "foreground") for b in boxes} == {MUTED[colour]}
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 from PIL import Image
 
-from gui.palette import COLOUR_SURFACE
+from gui.palette import BUTTON_QUIET, MUTED, SURFACE
 from modules.aes_modes import encrypt_pixels_cbc, encrypt_pixels_ecb
 
 # Larger images are shrunk before they are encrypted: the pattern shows just
@@ -103,7 +103,7 @@ class ImageDemo(ctk.CTkFrame):
             text="Use Sample",
             command=lambda: self._show_ecb_demo(_SAMPLE),
             width=90,
-            fg_color="#555",
+            fg_color=BUTTON_QUIET,
         ).grid(row=0, column=2, padx=(4, 0))
 
         ctk.CTkLabel(
@@ -113,12 +113,12 @@ class ImageDemo(ctk.CTkFrame):
                 "CBC shown here.\nBest with flat colours: logos and drawings."
             ),
             font=("Courier New", 9),
-            text_color="gray",
+            text_color=MUTED,
             justify="left",
         ).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 0))
 
         # Image display area
-        img_frame = ctk.CTkFrame(self, fg_color=COLOUR_SURFACE)
+        img_frame = ctk.CTkFrame(self, fg_color=SURFACE)
         img_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=4)
         img_frame.grid_columnconfigure((0, 1, 2), weight=1)
         img_frame.grid_rowconfigure(0, weight=1)
@@ -137,11 +137,11 @@ class ImageDemo(ctk.CTkFrame):
                 img_frame,
                 text=cap,
                 font=("Courier New", 9),
-                text_color="gray",
+                text_color=MUTED,
             ).grid(row=1, column=col, padx=4, pady=(0, 4))
 
         self._size_note = ctk.CTkLabel(
-            img_frame, text="", font=("Courier New", 9), text_color="gray"
+            img_frame, text="", font=("Courier New", 9), text_color=MUTED
         )
         self._size_note.grid(row=2, column=0, columnspan=3, pady=(0, 4))
 

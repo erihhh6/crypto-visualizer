@@ -19,6 +19,7 @@ from PIL import Image, ImageTk
 
 from gui.aes_tab import AESTab
 from gui.key_exchange_tab import KeyExchangeTab
+from gui.palette import MUTED, use_readable_theme
 from gui.tamper_tab import TamperTab
 
 _ICON_PATH = os.path.join(
@@ -26,11 +27,10 @@ _ICON_PATH = os.path.join(
 )
 
 
-# The palette (block canvas, cards, plots) is hand-picked for dark backgrounds;
-# following a light OS theme put near-invisible dark text on those dark cards.
-# Stay dark until the colours come from light/dark theme pairs.
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+# Follow the operating system's light or dark theme: every colour comes as a
+# light/dark pair (gui.palette).
+ctk.set_appearance_mode("System")
+use_readable_theme()
 
 
 class MainWindow(ctk.CTk):
@@ -94,7 +94,7 @@ class MainWindow(ctk.CTk):
             header,
             text="Interactive cryptography demonstrations",
             font=ctk.CTkFont(size=12),
-            text_color="gray",
+            text_color=MUTED,
         ).grid(row=0, column=1, sticky="w", padx=12)
 
         # ── Main content box (the big lighter-gray frame) ─────────────────

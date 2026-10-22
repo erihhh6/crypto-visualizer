@@ -7,10 +7,10 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import Any
 
-import customtkinter as ctk
 import pytest
 
 from gui.block_canvas import MAX_DRAWN_BLOCKS, BlockCanvas
+from gui.palette import MUTED, SURFACE
 from modules.aes_modes import AesMode, EncryptionResult, encrypt
 from tests.gui.helpers import (
     block_canvas,
@@ -319,14 +319,20 @@ def test_tooltip_comes_back_after_hiding(canvas: tk.Canvas, root: Any) -> None:
     assert visible_tooltip_text(root).startswith("Block 0")
 
 
-def test_theme_switch_keeps_the_block_canvas_background(
-    canvas: tk.Canvas, root: Any
+def test_a_theme_switch_repaints_the_canvas_and_keeps_the_selection(
+    canvas: tk.Canvas, switch_appearance: Callable[[str], None]
 ) -> None:
-    original = canvas.cget("background")
-    other_mode = "Dark" if ctk.get_appearance_mode() == "Light" else "Light"
-    try:
-        ctk.set_appearance_mode(other_mode)
-        pump(root)
-        assert canvas.cget("background") == original
-    finally:
-        ctk.set_appearance_mode("System")
+    click_block(canvas, 1)
+    selected = _border(canvas, 1)
+    require(selected != _border(canvas, 0), "clicking did not select block 1")
+
+    for mode, colour in (("Dark", 1), ("Light", 0)):
+        switch_appearance(mode)
+
+        # Its own surface colour, not CustomTkinter's frame colour (once a bug).
+        assert canvas.cget("background") == SURFACE[colour]
+        headers = {
+            item_option(canvas, i, "fill") for i in canvas.find_withtag("header")
+        }
+        assert headers == {MUTED[colour]}
+        assert _border(canvas, 1) == selected  # still selected after the repaint

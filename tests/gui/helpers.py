@@ -79,7 +79,7 @@ def visible_tooltip_text(root: tk.Misc) -> str:
 
 
 def label_text(label: Any) -> str:
-    """The text a CTkLabel shows, whether set directly or through a variable."""
+    """The text a (CTk) label shows, whether set directly or through a variable."""
     # cget returns the variable's Tcl name (a Tcl_Obj, not a tk.Variable),
     # or "" when the label has no variable.
     variable = str(label.cget("textvariable"))
@@ -148,15 +148,17 @@ def click_block(canvas: tk.Canvas, index: int) -> None:
     canvas.event_generate("<Button-1>", x=x, y=y)
 
 
-def run_app_script(code: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+def run_app_script(
+    code: str, *args: str, timeout: float = 120
+) -> subprocess.CompletedProcess[str]:
     """
-    Run *code* in a fresh interpreter from the repository root.
+    Run *code* in a fresh interpreter from the repository root, with *args*.
 
     Import-time behaviour (such as the appearance mode) only shows up
     the way a user sees it in a process that has not imported the app before.
     """
     return subprocess.run(
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", code, *args],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -170,27 +172,6 @@ def run_app_script(code: str, timeout: float = 120) -> subprocess.CompletedProce
 # ---------------------------------------------------------------------------
 # Text contrast (WCAG 2.x definitions)
 # ---------------------------------------------------------------------------
-
-
-def _for_current_mode(color: Any) -> str:
-    """CustomTkinter colours are a name or a (light, dark) pair."""
-    if isinstance(color, tuple | list):
-        return str(color[0 if ctk.get_appearance_mode() == "Light" else 1])
-    return str(color)
-
-
-def _background_of(widget: tk.Misc) -> str:
-    """The colour actually painted behind *widget*: the nearest opaque ancestor."""
-    current: tk.Misc | None = widget
-    while current is not None:
-        try:
-            color = _for_current_mode(current.cget("fg_color"))
-        except (tk.TclError, ValueError):  # plain Tk widget, no fg_color option
-            color = str(current.cget("background"))
-        if color != "transparent":
-            return color
-        current = current.master
-    raise LookupError(f"no opaque background behind {widget}")
 
 
 def _relative_luminance(widget: tk.Misc, color: str) -> float:
@@ -214,21 +195,68 @@ def contrast_ratio(widget: tk.Misc, foreground: str, background: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def low_contrast_labels(window: tk.Misc, minimum: float) -> list[str]:
-    """Describe every non-empty CTkLabel whose text contrast is below *minimum*."""
-    offenders = []
-    for label in descendants(window):
-        if not isinstance(label, ctk.CTkLabel):
-            continue
-        text = label_text(label)
-        if not text.strip():
-            continue
-        foreground = _for_current_mode(label.cget("text_color"))
-        background = _background_of(label)
-        ratio = contrast_ratio(label, foreground, background)
+def _canvas_background(canvas: tk.Canvas, item: int) -> str:
+    """The fill of the topmost shape under a canvas item, else the canvas's."""
+    x0, y0, x1, y1 = canvas.bbox(item)
+    x, y = (x0 + x1) / 2, (y0 + y1) / 2
+    below = canvas.find_overlapping(x, y, x, y)
+    shapes = [
+        i
+        for i in below[: below.index(item)]
+        if item_type(canvas, i) in ("rectangle", "oval")
+        and item_option(canvas, i, "fill")
+    ]
+    return (
+        item_option(canvas, shapes[-1], "fill") if shapes else str(canvas["background"])
+    )
+
+
+def _disabled_control(label: tk.Label) -> bool:
+    """Text on a disabled control: WCAG sets it no contrast requirement."""
+    try:
+        return str(label.master.cget("state")) == "disabled"
+    except (tk.TclError, ValueError, AttributeError):
+        return False
+
+
+def low_contrast_text(window: tk.Misc, minimum: float) -> list[str]:
+    """
+    Describe every piece of text in *window* below *minimum* contrast.
+
+    It checks the colours actually drawn: every Tk label (CustomTkinter's
+    labels and buttons draw their text in one), every text box and each of
+    its tags, and every text on a canvas against the shape beneath it.
+    """
+    offenders: list[str] = []
+
+    def check(widget: tk.Misc, what: str, foreground: str, background: str) -> None:
+        ratio = contrast_ratio(widget, foreground, background)
         if ratio < minimum:
-            snippet = text.strip().splitlines()[0][:40]
+            snippet = what.strip().splitlines()[0][:40] if what.strip() else ""
             offenders.append(
                 f"{ratio:.2f}:1  {foreground} on {background}  {snippet!r}"
             )
+
+    for widget in descendants(window):
+        if isinstance(widget, tk.Label):
+            text = label_text(widget)
+            if text.strip() and not _disabled_control(widget):
+                check(widget, text, widget["foreground"], widget["background"])
+        elif isinstance(widget, tk.Text):
+            foreground, background = widget["foreground"], widget["background"]
+            check(widget, widget.get("1.0", "end-1c"), foreground, background)
+            for tag in widget.tag_names():
+                if tag != "sel":
+                    tag_fg = widget.tag_cget(tag, "foreground") or foreground
+                    tag_bg = widget.tag_cget(tag, "background") or background
+                    check(widget, f"text tagged {tag!r}", str(tag_fg), str(tag_bg))
+        # CustomTkinter draws rounded corners with font glyphs on its own
+        # canvases; those characters are shapes, not text.
+        elif isinstance(widget, tk.Canvas) and not isinstance(widget, ctk.CTkCanvas):
+            for item in widget.find_all():
+                if item_type(widget, item) == "text":
+                    text = item_option(widget, item, "text")
+                    if text.strip():
+                        fill = item_option(widget, item, "fill")
+                        check(widget, text, fill, _canvas_background(widget, item))
     return offenders

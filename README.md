@@ -19,6 +19,8 @@
 - **Key Exchange** — Diffie-Hellman (3072-bit RFC 3526 group 15 by default, which matches P-256's 128-bit security, or 2048-bit group 14) and ECDH (SECP256R1), told one step at a time (Next/Prev, ←/→ keys or autoplay), both ending with an AES-256 key derived by HKDF-SHA256; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
 
+The app follows your system's light or dark theme, switching live, and all its text meets WCAG AA contrast (4.5:1) in both.
+
 ---
 
 ## Why it matters
@@ -92,7 +94,7 @@ crypto-visualizer/
 │   ├── image_demo.py          # ECB vs CBC on an image's pixels
 │   ├── mode_comparison.py     # One message in all four modes, equal blocks coloured
 │   ├── tooltip.py             # Pointer-following tooltip window
-│   ├── palette.py             # Colours shared between widgets
+│   ├── palette.py             # Light/dark colour pairs, readable button theme
 │   ├── tamper_tab.py          # Tamper Lab: wrong keys and forged edits, per mode
 │   ├── key_exchange_tab.py    # Step animator and key-size comparison table
 │   └── exchange_plot.py       # DH message flow, or the toy curve's ECDH points

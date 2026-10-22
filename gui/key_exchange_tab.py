@@ -14,7 +14,19 @@ import tkinter as tk
 import customtkinter as ctk
 
 from gui.exchange_plot import ExchangePlot
-from gui.palette import ACTOR_COLOURS, VALUE_COLOURS
+from gui.palette import (
+    ACTOR_COLOURS,
+    ACTOR_FILLS,
+    BUTTON_PRIMARY,
+    BUTTON_QUIET,
+    BUTTON_SECONDARY,
+    CARD,
+    CURRENT_CARD,
+    GREEN,
+    MUTED,
+    ORANGE,
+    VALUE_COLOURS,
+)
 from modules.key_exchange import (
     EQUIVALENT_KEY_SIZES,
     MODP_2048,
@@ -59,8 +71,6 @@ def _value_line(item: Value) -> str:
     return f"{icon} {item.symbol} = {_format(item.value)}"
 
 
-CARD_BG = "#1E2533"
-CURRENT_CARD_BG = "#2C3E50"
 AUTOPLAY_MS = 1500  # time on each step when playing
 
 
@@ -68,7 +78,7 @@ class StepCard(ctk.CTkFrame):
     """A single step card in the step animator scroll frame."""
 
     def __init__(self, parent: tk.Widget, step: Step, **kwargs: object) -> None:
-        super().__init__(parent, fg_color=CARD_BG, corner_radius=8, **kwargs)
+        super().__init__(parent, fg_color=CARD, corner_radius=8, **kwargs)
         self.grid_columnconfigure(1, weight=1)
 
         actor_col = ACTOR_COLOURS[step.actor]
@@ -78,7 +88,7 @@ class StepCard(ctk.CTkFrame):
             self,
             text=f"{step.number}",
             font=ctk.CTkFont(family="Courier New", size=16, weight="bold"),
-            fg_color=actor_col,
+            fg_color=ACTOR_FILLS[step.actor],
             text_color="white",
             corner_radius=20,
             width=36,
@@ -118,7 +128,7 @@ class StepCard(ctk.CTkFrame):
 
     def set_current(self, current: bool) -> None:
         """Highlight the card while its step is the current one."""
-        self.configure(fg_color=CURRENT_CARD_BG if current else CARD_BG)
+        self.configure(fg_color=CURRENT_CARD if current else CARD)
 
 
 class KeyExchangeTab(ctk.CTkFrame):
@@ -163,7 +173,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             text="Run DH",
             command=self._run_dh,
             width=90,
-            fg_color="#2E86AB",
+            fg_color=BUTTON_PRIMARY,
         )
         self._dh_btn.pack(side="left", padx=(0, 4))
 
@@ -182,7 +192,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             text="Run ECDH (P-256)",
             command=self._run_ecdh,
             width=160,
-            fg_color="#5C6BC0",
+            fg_color=BUTTON_SECONDARY,
         )
         self._ecdh_btn.pack(side="left", padx=(0, 8))
 
@@ -191,7 +201,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             text="Show Comparison ▼",
             command=self._show_comparison,
             width=160,
-            fg_color="#555",
+            fg_color=BUTTON_QUIET,
         )
         self._cmp_btn.pack(side="left")
 
@@ -200,7 +210,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             ctrl,
             textvariable=self._status_var,
             font=("Courier New", 10),
-            text_color="gray",
+            text_color=MUTED,
         ).pack(side="left", padx=16)
 
     def _build_main_area(self) -> None:
@@ -236,7 +246,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             command=self._toggle_autoplay,
             width=80,
             state="disabled",
-            fg_color="#555",
+            fg_color=BUTTON_QUIET,
         )
         self._play_btn.pack(side="left", padx=(2, 8))
 
@@ -284,7 +294,7 @@ class KeyExchangeTab(ctk.CTkFrame):
                 comp,
                 text=h,
                 font=ctk.CTkFont(size=11, weight="bold"),
-                text_color="gray",
+                text_color=MUTED,
             ).grid(row=0, column=col, padx=12, pady=(6, 2), sticky="w")
 
         for row, level in enumerate(EQUIVALENT_KEY_SIZES, start=1):
@@ -296,19 +306,19 @@ class KeyExchangeTab(ctk.CTkFrame):
                 comp,
                 text=f"{level.ffdh_bits:,} bits",
                 font=("Courier New", 10),
-                text_color="#E07B39",
+                text_color=ORANGE,
             ).grid(row=row, column=1, padx=12, pady=2, sticky="w")
             ctk.CTkLabel(
                 comp,
                 text=f"{level.ecdh_bits} bits",
                 font=("Courier New", 10),
-                text_color="#5BAD72",
+                text_color=GREEN,
             ).grid(row=row, column=2, padx=12, pady=2, sticky="w")
             ctk.CTkLabel(
                 comp,
                 text=f"ECDH is ~{ratio}× smaller",
                 font=("Courier New", 10),
-                text_color="gray",
+                text_color=MUTED,
             ).grid(row=row, column=3, padx=12, pady=2, sticky="w")
 
     # ------------------------------------------------------------------

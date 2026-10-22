@@ -37,6 +37,11 @@ def display() -> None:
 def light_mode_os(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make CustomTkinter's "System" appearance resolve to light on every OS."""
     monkeypatch.setattr("darkdetect.theme", lambda: "Light")
+    # CustomTkinter remembers the theme it saw at import, and only looks again
+    # from a polling loop: on a dark-mode OS a test could start dark. Set light
+    # outright, then hand the choice back to the (now light) "System" theme.
+    ctk.set_appearance_mode("Light")
+    ctk.set_appearance_mode("System")
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +64,18 @@ def no_dialogs(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     yield shown
     if shown:
         pytest.fail("unexpected dialog(s):\n" + "\n".join(shown))
+
+
+@pytest.fixture
+def switch_appearance(root: Any) -> Iterator[Callable[[str], None]]:
+    """Switch the app to "Light" or "Dark"; back to following the OS afterwards."""
+
+    def switch(mode: str) -> None:
+        ctk.set_appearance_mode(mode)
+        pump(root)
+
+    yield switch
+    ctk.set_appearance_mode("System")
 
 
 @pytest.fixture

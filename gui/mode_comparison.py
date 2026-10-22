@@ -15,31 +15,40 @@ from collections.abc import Iterable, Sequence
 
 import customtkinter as ctk
 
-from gui.palette import COLOUR_PANEL
+from gui.palette import (
+    MODE_COLOURS,
+    MUTED,
+    PANEL,
+    Colour,
+    follow_appearance,
+    resolve,
+)
 from gui.tooltip import Tooltip
 from modules.aes_modes import BLOCK_SIZE, AesMode, EncryptionResult
 
-_MODE_COLOURS = {
-    AesMode.ECB: "#E07B39",
-    AesMode.CBC: "#5B9BD5",
-    AesMode.CTR: "#5BAD72",
-    AesMode.GCM: "#9B59B6",
-}
-
-NEUTRAL = "#4A4A60"  # a block that occurs only once
+# Squares stand out from the cards by at least 3:1 in both modes, the WCAG
+# minimum for graphics.
+NEUTRAL: Colour = ("#7D8394", "#7A7F94")  # a block that occurs only once
 # One colour per group of equal blocks, in order of first appearance. More
 # groups than colours reuse them; real messages rarely get that far.
-REPEAT_COLOURS = ("#E74C3C", "#F1C40F", "#2ECC71", "#3498DB", "#E67E22", "#1ABC9C")
+REPEAT_COLOURS: tuple[Colour, ...] = (
+    ("#B03A2E", "#FF6B5E"),
+    ("#8A5D00", "#F1C40F"),
+    ("#2C7A45", "#2ECC71"),
+    ("#2B6CB0", "#5DADE2"),
+    ("#A9501A", "#F39C4B"),
+    ("#13776F", "#1ABC9C"),
+)
 
 CHIP = 16  # square size
 CHIP_GAP = 3
 MAX_CHIPS = 10  # per strip; the rest are counted, not drawn
 
 
-def strip_colours(blocks: Sequence[bytes]) -> list[str]:
+def strip_colours(blocks: Sequence[bytes]) -> list[Colour]:
     """One colour per block: equal blocks share a colour, unique ones are neutral."""
     counts = Counter(blocks)
-    group_colour: dict[bytes, str] = {}
+    group_colour: dict[bytes, Colour] = {}
     colours = []
     for block in blocks:
         if counts[block] < 2:
@@ -72,14 +81,18 @@ def _summary(result: EncryptionResult) -> str:
 class BlockStrip(tk.Canvas):
     """A row of squares, one per block; hovering one shows its bytes."""
 
-    def __init__(self, parent: tk.Misc, background: str) -> None:
-        super().__init__(
-            parent, width=CHIP, height=CHIP, background=background, highlightthickness=0
-        )
+    def __init__(self, parent: tk.Misc, background: Colour) -> None:
+        super().__init__(parent, width=CHIP, height=CHIP, highlightthickness=0)
+        self._background = background
         self._blocks: Sequence[bytes] = ()
         self._tooltip = Tooltip(self)
         self.bind("<Motion>", self._on_motion)
         self.bind("<Leave>", lambda _e: self._tooltip.hide())
+        follow_appearance(self, self._restyle)
+
+    def _restyle(self) -> None:
+        self.configure(background=resolve(self._background))
+        self.show(self._blocks)
 
     def show(self, blocks: Sequence[bytes]) -> None:
         self.delete("all")
@@ -88,7 +101,7 @@ class BlockStrip(tk.Canvas):
         for index, colour in enumerate(colours):
             x = index * (CHIP + CHIP_GAP)
             self.create_rectangle(
-                x, 0, x + CHIP, CHIP, fill=colour, outline="", tags=("chip",)
+                x, 0, x + CHIP, CHIP, fill=resolve(colour), outline="", tags=("chip",)
             )
         width = len(colours) * (CHIP + CHIP_GAP)
         if len(blocks) > len(colours):
@@ -98,7 +111,7 @@ class BlockStrip(tk.Canvas):
                 text=f"+{len(blocks) - len(colours)}",
                 anchor="w",
                 font=("Courier New", 8),
-                fill="gray",
+                fill=resolve(MUTED),
                 tags=("more",),
             )
             width += 30
@@ -120,9 +133,9 @@ class ModeCard(ctk.CTkFrame):
         # The border is invisible (panel-coloured) until the card is selected.
         super().__init__(
             parent,
-            fg_color=COLOUR_PANEL,
+            fg_color=PANEL,
             border_width=2,
-            border_color=COLOUR_PANEL,
+            border_color=PANEL,
             **kwargs,
         )
         self.mode = mode
@@ -132,14 +145,14 @@ class ModeCard(ctk.CTkFrame):
             self,
             text=mode,
             font=ctk.CTkFont(family="Courier New", size=12, weight="bold"),
-            text_color=_MODE_COLOURS[mode],
+            text_color=MODE_COLOURS[mode],
         ).grid(row=0, column=0, padx=(8, 4), pady=(6, 2), sticky="w")
         self._marker = ctk.CTkLabel(
-            self, text="", font=("Courier New", 9), text_color="gray"
+            self, text="", font=("Courier New", 9), text_color=MUTED
         )
         self._marker.grid(row=0, column=1, padx=8, pady=(6, 2), sticky="e")
 
-        self._strip = BlockStrip(self, background=COLOUR_PANEL)
+        self._strip = BlockStrip(self, background=PANEL)
         self._strip.grid(row=1, column=0, columnspan=2, padx=8, sticky="w")
 
         self._info = ctk.CTkLabel(
@@ -151,9 +164,7 @@ class ModeCard(ctk.CTkFrame):
         self._strip.show([blk.ciphertext for blk in result.blocks])
         self._info.configure(text=_summary(result))
         self._marker.configure(text="drawn above" if selected else "")
-        self.configure(
-            border_color=_MODE_COLOURS[self.mode] if selected else COLOUR_PANEL
-        )
+        self.configure(border_color=MODE_COLOURS[self.mode] if selected else PANEL)
 
 
 class ModeComparison(ctk.CTkFrame):
@@ -171,18 +182,18 @@ class ModeComparison(ctk.CTkFrame):
             text="Mode Comparison — one message, one key, every mode",
             font=ctk.CTkFont(size=12, weight="bold"),
         ).pack(side="left")
-        plaintext = ctk.CTkFrame(header, fg_color=COLOUR_PANEL)
+        plaintext = ctk.CTkFrame(header, fg_color=PANEL)
         plaintext.pack(side="left", padx=12)
         ctk.CTkLabel(
-            plaintext, text="plaintext", font=("Courier New", 9), text_color="gray"
+            plaintext, text="plaintext", font=("Courier New", 9), text_color=MUTED
         ).pack(side="left", padx=(8, 4))
-        self._plaintext_strip = BlockStrip(plaintext, background=COLOUR_PANEL)
+        self._plaintext_strip = BlockStrip(plaintext, background=PANEL)
         self._plaintext_strip.pack(side="left", padx=(0, 8), pady=4)
         ctk.CTkLabel(
             header,
             text="same colour = same 16-byte block",
             font=("Courier New", 9),
-            text_color="gray",
+            text_color=MUTED,
         ).pack(side="left")
 
         self._cards: dict[AesMode, ModeCard] = {}
