@@ -22,7 +22,10 @@ _ICON_PATH = os.path.join(
 )
 
 
-ctk.set_appearance_mode("System")
+# The palette (block canvas, cards, plots) is hand-picked for dark backgrounds;
+# following a light OS theme put near-invisible dark text on those dark cards.
+# Stay dark until the colours come from light/dark theme pairs.
+ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 

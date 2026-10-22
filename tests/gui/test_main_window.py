@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 from tests.gui.helpers import require, run_app_script
-from tests.markers import known_bug
 
 _START = """
 from gui.main_window import MainWindow
@@ -72,7 +71,6 @@ def test_closing_the_window_ends_the_process() -> None:
     )
 
 
-@known_bug("on a light-mode OS, text on the hard-coded dark cards is near-invisible")
 def test_text_stays_readable_on_a_light_mode_os() -> None:
     result = run_app_script(_LIGHT_OS_CONTRAST)
 
