@@ -4,6 +4,7 @@ Tests for modules/aes_modes.py.
 Covers:
   - Round-trip correctness for all four modes (ECB, CBC, CTR, GCM)
   - BlockInfo metadata (count, labels, hex format)
+  - Displayed per-block values reproduce the real ciphertext
   - Key size validation
   - encrypt_pixels_ecb / encrypt_pixels_cbc helpers
   - NIST AES-128-ECB known-answer test (FIPS 197, Appendix B)
@@ -15,6 +16,7 @@ import os
 
 import pytest
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from modules.aes_modes import (
     BLOCK_SIZE,
@@ -30,6 +32,7 @@ from modules.aes_modes import (
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
 )
+from tests.markers import known_bug
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -199,6 +202,57 @@ class TestGCM:
     def test_nonce_is_12_bytes(self, key128: bytes, plaintext: bytes) -> None:
         n_ct, _, _ = encrypt_gcm(plaintext, key128)
         assert len(n_ct[:12]) == 12
+
+
+# ---------------------------------------------------------------------------
+# Displayed block values vs. the real cipher
+#
+# The canvas teaches *how* each mode turns plaintext into ciphertext, so every
+# value it shows must reproduce the ciphertext when fed to raw AES by hand.
+# ---------------------------------------------------------------------------
+
+
+def _aes_block(key: bytes, block: bytes) -> bytes:
+    """Encrypt one 16-byte block with the bare AES permutation."""
+    encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+    return encryptor.update(block) + encryptor.finalize()
+
+
+def _keystream_reproduces_ciphertext(key: bytes, blocks: list[BlockInfo]) -> bool:
+    """For counter modes: plaintext XOR E_k(counter) must equal the ciphertext."""
+    for blk in blocks:
+        pt = bytes.fromhex(blk.plaintext_hex)
+        keystream = _aes_block(key, bytes.fromhex(blk.iv_or_xor_hex))
+        expected = bytes(p ^ k for p, k in zip(pt, keystream[: len(pt)], strict=True))
+        if expected != bytes.fromhex(blk.ciphertext_hex):
+            return False
+    return True
+
+
+class TestBlockMetadataMatchesCipher:
+    def test_cbc_xor_input_encrypts_to_ciphertext(
+        self, key128: bytes, plaintext: bytes
+    ) -> None:
+        _, blocks = encrypt_cbc(plaintext, key128)
+        for blk in blocks:
+            xor_input = bytes.fromhex(blk.iv_or_xor_hex)
+            assert _aes_block(key128, xor_input).hex().upper() == blk.ciphertext_hex
+
+    @known_bug(
+        "CTR shows nonce[:8] || block index as the counter, but the cipher "
+        "increments the whole 16-byte nonce"
+    )
+    def test_ctr_counter_produces_the_keystream(
+        self, key128: bytes, plaintext: bytes
+    ) -> None:
+        _, blocks = encrypt_ctr(plaintext, key128)
+        assert _keystream_reproduces_ciphertext(key128, blocks)
+
+    def test_gcm_counter_produces_the_keystream(
+        self, key128: bytes, plaintext: bytes
+    ) -> None:
+        _, _, blocks = encrypt_gcm(plaintext, key128)
+        assert _keystream_reproduces_ciphertext(key128, blocks)
 
 
 # ---------------------------------------------------------------------------

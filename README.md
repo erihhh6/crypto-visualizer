@@ -50,6 +50,11 @@ python -m mypy           # strict type check
 CI runs the same checks on every push and pull request, with tests on
 Python 3.11–3.15. Tool configuration lives in `pyproject.toml`.
 
+GUI tests (`tests/gui/`) open real windows, so expect brief flashes on your
+desktop; CI runs them under `xvfb`, and without any display they are skipped.
+Known bugs are recorded as tests marked `known_bug(...)` (strict expected
+failures) until the commit that fixes them removes the marker.
+
 ---
 
 ## Concepts demonstrated

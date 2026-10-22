@@ -11,6 +11,9 @@ addopts = [
     "--strict-config",
     # Provides the `pytester` fixture used to test our own test helpers.
     "-p", "pytester",
+    # The default fd-level capture makes Tk start-up fail intermittently on
+    # Windows (invalid command name "tcl_findLibrary"); sys-level does not.
+    "--capture=sys",
 ]
 xfail_strict = true
 # A new deprecation in a dependency should fail CI, not scroll by unnoticed.
