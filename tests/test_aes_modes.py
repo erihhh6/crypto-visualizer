@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from modules.aes_modes import (
     BLOCK_SIZE,
     BlockInfo,
+    ctr_counter_block,
     decrypt_cbc,
     decrypt_ctr,
     decrypt_ecb,
@@ -32,7 +33,6 @@ from modules.aes_modes import (
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
 )
-from tests.markers import known_bug
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -238,15 +238,34 @@ class TestBlockMetadataMatchesCipher:
             xor_input = bytes.fromhex(blk.iv_or_xor_hex)
             assert _aes_block(key128, xor_input).hex().upper() == blk.ciphertext_hex
 
-    @known_bug(
-        "CTR shows nonce[:8] || block index as the counter, but the cipher "
-        "increments the whole 16-byte nonce"
-    )
     def test_ctr_counter_produces_the_keystream(
         self, key128: bytes, plaintext: bytes
     ) -> None:
         _, blocks = encrypt_ctr(plaintext, key128)
         assert _keystream_reproduces_ciphertext(key128, blocks)
+
+    # A random initial counter practically never overflows within one message,
+    # so the carry and wrap-around paths are pinned with chosen values.
+    @pytest.mark.parametrize(
+        ("initial", "expected_next"),
+        [
+            pytest.param(
+                bytes(8) + b"\xff" * 8,
+                bytes(7) + b"\x01" + bytes(8),
+                id="carries-into-high-half",
+            ),
+            pytest.param(b"\xff" * 16, bytes(16), id="wraps-at-2^128"),
+        ],
+    )
+    def test_ctr_counter_follows_the_cipher_through_overflow(
+        self, key128: bytes, initial: bytes, expected_next: bytes
+    ) -> None:
+        assert ctr_counter_block(initial, 1) == expected_next
+
+        # Encrypting zeros returns the raw keystream: E_k(counter) per block.
+        encryptor = Cipher(algorithms.AES(key128), modes.CTR(initial)).encryptor()
+        keystream = encryptor.update(bytes(2 * BLOCK_SIZE)) + encryptor.finalize()
+        assert keystream[BLOCK_SIZE:] == _aes_block(key128, expected_next)
 
     def test_gcm_counter_produces_the_keystream(
         self, key128: bytes, plaintext: bytes

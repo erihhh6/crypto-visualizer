@@ -60,6 +60,19 @@ def _validate_key(key: bytes) -> None:
         raise ValueError(f"Key must be 16, 24, or 32 bytes; got {len(key)}")
 
 
+def ctr_counter_block(initial_counter: bytes, block_index: int) -> bytes:
+    """
+    Return the counter block that AES-CTR encrypts for block *block_index*.
+
+    The cipher treats all 16 bytes of the initial counter block as one
+    big-endian integer: block i uses initial + i, carrying across the 64-bit
+    boundary and wrapping at 2**128. Many protocols lay the block out as
+    nonce || counter instead; PyCA does not, so the display must not either.
+    """
+    value = int.from_bytes(initial_counter, "big") + block_index
+    return (value % (1 << 128)).to_bytes(BLOCK_SIZE, "big")
+
+
 # ---------------------------------------------------------------------------
 # Encrypt functions
 # ---------------------------------------------------------------------------
@@ -140,22 +153,22 @@ def encrypt_cbc(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
 
 def encrypt_ctr(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
     """
-    Encrypt *plaintext* with AES-CTR (random nonce prepended).
+    Encrypt *plaintext* with AES-CTR (random initial counter block prepended).
 
     Returns
     -------
     nonce_ciphertext : bytes
-        16-byte nonce followed by ciphertext.
+        16-byte initial counter block (PyCA calls it the nonce) followed by
+        the ciphertext.
     blocks : list[BlockInfo]
         *iv_or_xor_hex* holds the counter block used for each plaintext block.
     """
     _validate_key(key)
-    nonce = os.urandom(16)
-    cipher = Cipher(algorithms.AES(key), modes.CTR(nonce))
+    initial_counter = os.urandom(BLOCK_SIZE)
+    cipher = Cipher(algorithms.AES(key), modes.CTR(initial_counter))
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(plaintext) + encryptor.finalize()
 
-    # Build counter blocks for metadata (nonce with last 8 bytes as big-endian counter)
     pt_blocks_raw = [
         plaintext[i : i + BLOCK_SIZE] for i in range(0, len(plaintext), BLOCK_SIZE)
     ]
@@ -165,8 +178,7 @@ def encrypt_ctr(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
 
     blocks: list[BlockInfo] = []
     for i, (pt, ct) in enumerate(zip(pt_blocks_raw, ct_blocks_raw, strict=True)):
-        # Counter block = nonce[:8] || big-endian counter
-        counter_block = nonce[:8] + struct.pack(">Q", i)
+        counter_block = ctr_counter_block(initial_counter, i)
         blocks.append(
             BlockInfo(
                 index=i,
@@ -176,7 +188,7 @@ def encrypt_ctr(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
                 mode_label="CTR",
             )
         )
-    return nonce + ciphertext, blocks
+    return initial_counter + ciphertext, blocks
 
 
 def encrypt_gcm(plaintext: bytes, key: bytes) -> tuple[bytes, bytes, list[BlockInfo]]:
