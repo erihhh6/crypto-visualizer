@@ -14,7 +14,7 @@
 
 - **AES Modes** — ECB, CBC, CTR, GCM drawn as per-block data flow (IV and CBC chaining, counters and keystream, the GCM tag), with hover tooltips and click-to-inspect
 - **ECB Penguin Attack** — load any BMP image and see why ECB mode is dangerous (structural patterns survive encryption)
-- **Key Exchange** — Diffie-Hellman (2048-bit, RFC 3526 Group 14) and ECDH (SECP256R1) with step-by-step animation
+- **Key Exchange** — Diffie-Hellman (2048-bit, RFC 3526 Group 14) and ECDH (SECP256R1) with step-by-step animation; ECDH is replayed on a toy curve (y² = x³ − 3x + 10 mod 97) small enough to plot every point
 - **DH vs ECDH size comparison** — equivalent security levels at dramatically different key sizes
 
 ---
@@ -79,7 +79,8 @@ crypto-visualizer/
 ├── main.py                    # Entry point
 ├── modules/
 │   ├── aes_modes.py           # AES ECB/CBC/CTR/GCM encrypt/decrypt + per-block detail
-│   └── key_exchange.py        # DH + ECDH step-by-step + comparison
+│   ├── key_exchange.py        # DH + ECDH step-by-step + comparison
+│   └── toy_curve.py           # Curve arithmetic and ECDH on a plottable toy curve
 ├── gui/
 │   ├── main_window.py         # CustomTkinter window + tab view
 │   ├── aes_tab.py             # AES tab: controls, encrypt/decrypt, panel layout
@@ -88,7 +89,8 @@ crypto-visualizer/
 │   ├── mode_comparison.py     # One plaintext under all four modes
 │   ├── tooltip.py             # Pointer-following tooltip window
 │   ├── palette.py             # Colours shared between widgets
-│   └── key_exchange_tab.py    # Step animator, matplotlib curve, comparison table
+│   ├── key_exchange_tab.py    # Step animator and key-size comparison table
+│   └── exchange_plot.py       # DH message flow, or the toy curve's ECDH points
 ├── assets/
 │   └── sample.bmp             # Test image for ECB attack demo
 └── requirements.txt

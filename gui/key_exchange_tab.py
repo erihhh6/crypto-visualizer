@@ -1,9 +1,9 @@
 """
-Key Exchange tab — step-by-step DH/ECDH animator with matplotlib curve plot.
+Key Exchange tab — step-by-step DH/ECDH animator with a protocol plot.
 
 Layout:
   Row 0 : control buttons  [DH] [ECDH] [Compare]
-  Row 1 : step animator (left) | elliptic curve plot (right)
+  Row 1 : step animator (left) | DH flow or toy-curve plot (gui.exchange_plot)
   Row 2 : DH vs ECDH comparison table
 """
 
@@ -12,14 +12,11 @@ from __future__ import annotations
 import tkinter as tk
 
 import customtkinter as ctk
-import numpy as np
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-from matplotlib.patches import Rectangle
 
+from gui.exchange_plot import ExchangePlot
+from gui.palette import ACTOR_COLOURS, VALUE_COLOURS
 from modules.key_exchange import (
     EQUIVALENT_KEY_SIZES,
-    Actor,
     RawValue,
     Step,
     Value,
@@ -29,21 +26,7 @@ from modules.key_exchange import (
     run_dh,
     run_ecdh,
 )
-
-# ---------------------------------------------------------------------------
-# Colours
-# ---------------------------------------------------------------------------
-ACTOR_COLOURS = {
-    Actor.ALICE: "#5B9BD5",
-    Actor.BOB: "#E07B39",
-    Actor.BOTH: "#5BAD72",
-    Actor.SYSTEM: "#9B59B6",
-}
-VALUE_COLOURS = {
-    Visibility.PUBLIC: "#27AE60",
-    Visibility.SHARED_SECRET: "#E74C3C",
-    Visibility.PRIVATE: "#AAAAAA",
-}
+from modules.toy_curve import ToyECDH, run_toy_ecdh
 
 
 def _shorten(hex_text: str, max_chars: int) -> str:
@@ -135,7 +118,7 @@ class StepCard(ctk.CTkFrame):
 
 
 class KeyExchangeTab(ctk.CTkFrame):
-    """Key Exchange tab with step animator and embedded matplotlib curve."""
+    """Key Exchange tab with step animator and protocol plot."""
 
     def __init__(self, parent: tk.Widget, **kwargs: object) -> None:
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -145,6 +128,8 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._steps: tuple[Step, ...] = ()
         self._current_step: int = 0
         self._mode: str = "DH"
+        # The plotted stand-in for the P-256 exchange, made with each ECDH run.
+        self._toy_exchange: ToyECDH | None = None
 
         self._build_controls()
         self._build_main_area()
@@ -243,33 +228,9 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._step_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
         self._step_scroll.grid_columnconfigure(0, weight=1)
 
-        # -------- Right: matplotlib curve --------
-        right = ctk.CTkFrame(main)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.grid_rowconfigure(1, weight=1)
-        right.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            right,
-            text="Elliptic Curve Visualisation (P-256, simplified field)",
-            font=ctk.CTkFont(size=13, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 0))
-
-        # A bare Figure, not pyplot: pyplot attaches its figures to a hidden Tk
-        # root of its own, which kept mainloop() running after the window closed.
-        self._fig = Figure(figsize=(5, 4))
-        self._ax = self._fig.add_subplot()
-        self._fig.patch.set_facecolor("#1E2533")
-        self._ax.set_facecolor("#1E2533")
-        self._ax.tick_params(colors="gray")
-        for spine in self._ax.spines.values():
-            spine.set_edgecolor("gray")
-
-        self._mpl_canvas = FigureCanvasTkAgg(self._fig, master=right)
-        self._mpl_widget = self._mpl_canvas.get_tk_widget()
-        self._mpl_widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-
-        self._draw_empty_curve()
+        # -------- Right: protocol plot --------
+        self._plot = ExchangePlot(main)
+        self._plot.grid(row=0, column=1, sticky="nsew")
 
     def _build_comparison_table(self) -> None:
         comp = ctk.CTkFrame(self)
@@ -326,7 +287,7 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._current_step = 0
         self._mode = "DH"
         self._render_steps()
-        self._draw_dh_diagram()
+        self._plot.show_dh_flow()
         self._status_var.set(
             f"DH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
         )
@@ -335,10 +296,10 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._status_var.set("Running ECDH exchange…")
         self.update_idletasks()
         self._steps = ecdh_steps(run_ecdh())
+        self._toy_exchange = run_toy_ecdh()
         self._current_step = 0
         self._mode = "ECDH"
-        self._render_steps()
-        self._draw_ecdh_curve()
+        self._render_steps()  # also plots the toy exchange
         self._status_var.set(
             f"ECDH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
         )
@@ -407,202 +368,13 @@ class KeyExchangeTab(ctk.CTkFrame):
             self._render_steps()
 
     # ------------------------------------------------------------------
-    # Matplotlib plots
+    # Plot
     # ------------------------------------------------------------------
 
-    def _draw_empty_curve(self) -> None:
-        """Draw a placeholder elliptic curve y² = x³ - 3x + b on small field."""
-        self._ax.clear()
-        self._ax.set_facecolor("#1E2533")
-
-        # Draw the curve y^2 = x^3 - x + 1 over reals for visual
-        x = np.linspace(-2, 2.5, 400)
-        y_sq = x**3 - x + 1
-        mask = y_sq >= 0
-        y_pos = np.sqrt(np.where(mask, y_sq, 0))
-        y_neg = -y_pos
-
-        self._ax.plot(
-            x[mask],
-            y_pos[mask],
-            color="#5B9BD5",
-            linewidth=1.5,
-            label="y² = x³ − x + 1",
-        )
-        self._ax.plot(x[mask], y_neg[mask], color="#5B9BD5", linewidth=1.5)
-
-        self._ax.set_xlim(-2.5, 3)
-        self._ax.set_ylim(-3, 3)
-        self._ax.axhline(0, color="gray", linewidth=0.5)
-        self._ax.axvline(0, color="gray", linewidth=0.5)
-        self._ax.set_title("Elliptic Curve (simplified)", color="white", fontsize=10)
-        self._ax.tick_params(colors="gray", labelsize=7)
-        for spine in self._ax.spines.values():
-            spine.set_edgecolor("#444")
-        self._ax.legend(fontsize=7, facecolor="#1E2533", labelcolor="gray")
-        self._mpl_canvas.draw()
-
-    def _draw_dh_diagram(self) -> None:
-        """Show a simple Alice–Bob diagram for classical DH."""
-        self._ax.clear()
-        self._ax.set_facecolor("#1E2533")
-        self._ax.set_xlim(0, 10)
-        self._ax.set_ylim(0, 6)
-        self._ax.axis("off")
-        self._ax.set_title(
-            "DH Key Exchange — 2048-bit MODP (RFC 3526)", color="white", fontsize=9
-        )
-
-        # Alice box
-        self._ax.add_patch(Rectangle((0.5, 2), 2, 2, color="#2E86AB", zorder=2))
-        self._ax.text(
-            1.5,
-            3,
-            "Alice",
-            ha="center",
-            va="center",
-            color="white",
-            fontsize=11,
-            fontweight="bold",
-        )
-
-        # Bob box
-        self._ax.add_patch(Rectangle((7.5, 2), 2, 2, color="#E07B39", zorder=2))
-        self._ax.text(
-            8.5,
-            3,
-            "Bob",
-            ha="center",
-            va="center",
-            color="white",
-            fontsize=11,
-            fontweight="bold",
-        )
-
-        # Arrows A→Bob
-        self._ax.annotate(
-            "",
-            xy=(7.5, 3.4),
-            xytext=(2.5, 3.4),
-            arrowprops=dict(arrowstyle="->", color="#5BAD72", lw=2),
-        )
-        self._ax.text(5, 3.6, "A = g^a mod p", ha="center", color="#5BAD72", fontsize=8)
-
-        # Arrows B→Alice
-        self._ax.annotate(
-            "",
-            xy=(2.5, 2.6),
-            xytext=(7.5, 2.6),
-            arrowprops=dict(arrowstyle="->", color="#5B9BD5", lw=2),
-        )
-        self._ax.text(5, 2.3, "B = g^b mod p", ha="center", color="#5B9BD5", fontsize=8)
-
-        # Shared secret labels
-        self._ax.text(
-            1.5, 1.5, "shared = B^a mod p", ha="center", color="gray", fontsize=7
-        )
-        self._ax.text(
-            8.5, 1.5, "shared = A^b mod p", ha="center", color="gray", fontsize=7
-        )
-
-        self._ax.text(
-            5,
-            0.7,
-            "Both arrive at the same shared secret!",
-            ha="center",
-            color="#5BAD72",
-            fontsize=9,
-        )
-
-        self._mpl_canvas.draw()
-
-    @staticmethod
-    def _curve_y(x: float, positive: bool = True) -> float:
-        """Return y on the curve y² = x³ − x + 1 for a given x (must have y² ≥ 0)."""
-        y_sq = x**3 - x + 1
-        y = float(np.sqrt(max(y_sq, 0.0)))
-        return y if positive else -y
-
-    def _draw_ecdh_curve(self, highlighted_step: int = 0) -> None:
-        """Draw the elliptic curve with points that provably lie on y² = x³ − x + 1."""
-        self._ax.clear()
-        self._ax.set_facecolor("#1E2533")
-
-        # Plot curve y² = x³ − x + 1 over reals
-        x = np.linspace(-2, 2.5, 800)
-        y_sq = x**3 - x + 1
-        mask = y_sq >= 0
-        y_pos = np.sqrt(np.where(mask, y_sq, 0.0))
-        y_neg = -y_pos
-
-        self._ax.plot(
-            x[mask],
-            y_pos[mask],
-            color="#5B9BD5",
-            linewidth=1.8,
-            label="y² = x³ − x + 1",
-        )
-        self._ax.plot(x[mask], y_neg[mask], color="#5B9BD5", linewidth=1.8)
-
-        # Points computed so they exactly satisfy the curve equation
-        # G at x = -0.9  →  y² = (-0.9)³ + 0.9 + 1 = 1.171  →  y ≈ +1.082
-        # QA at x = 1.3  →  y² = 2.197 − 1.3 + 1  = 1.897  →  y ≈ +1.378
-        # QB at x = 2.0  →  y² = 8 − 2 + 1        = 7.000  →  y ≈ +2.646
-        # S  at x = 0.5  →  y² = 0.125 − 0.5 + 1  = 0.625  →  y ≈ −0.791
-        G = (-0.9, self._curve_y(-0.9, positive=True))
-        QA = (1.3, self._curve_y(1.3, positive=True))
-        QB = (2.0, self._curve_y(2.0, positive=True))
-        S = (0.5, self._curve_y(0.5, positive=False))
-
-        points_info = [
-            (G, "G (generator)", "#5BAD72"),
-            (QA, "QA (Alice pub)", "#5B9BD5"),
-            (QB, "QB (Bob pub)", "#E07B39"),
-            (S, "S (shared)", "#C0392B"),
-        ]
-
-        # Annotation offsets tuned per-point to avoid overlap with the curve line
-        offsets = [(-0.6, 0.3), (0.25, 0.35), (0.2, 0.3), (0.25, -0.35)]
-
-        step_to_show = min(highlighted_step, len(points_info) - 1)
-        for i, ((pt, label, col), (dx, dy)) in enumerate(
-            zip(points_info, offsets, strict=True)
-        ):
-            if i <= step_to_show:
-                self._ax.scatter(
-                    *pt, color=col, s=90, zorder=6, edgecolors="white", linewidths=0.6
-                )
-                self._ax.annotate(
-                    label,
-                    xy=pt,
-                    xytext=(pt[0] + dx, pt[1] + dy),
-                    color=col,
-                    fontsize=8,
-                    fontweight="bold",
-                    arrowprops=dict(arrowstyle="-", color=col, lw=0.8),
-                )
-
-        self._ax.set_xlim(-2.5, 3.2)
-        self._ax.set_ylim(-3.2, 3.5)
-        self._ax.axhline(0, color="gray", linewidth=0.4)
-        self._ax.axvline(0, color="gray", linewidth=0.4)
-        self._ax.set_title(
-            "ECDH — simplified curve y² = x³ − x + 1", color="white", fontsize=9
-        )
-        self._ax.tick_params(colors="gray", labelsize=7)
-        for spine in self._ax.spines.values():
-            spine.set_edgecolor("#444")
-        self._ax.legend(
-            fontsize=7, facecolor="#1E2533", labelcolor="gray", loc="upper left"
-        )
-
-        self._mpl_canvas.draw()
-
     def _update_plot_for_step(self) -> None:
-        """Animate the curve plot by revealing points as steps progress."""
-        if self._mode != "ECDH" or not self._steps:
+        """Highlight the toy exchange's points as the ECDH steps reach them."""
+        if self._mode != "ECDH" or self._toy_exchange is None:
             return
-        # Map step index → how many points to show
-        # Step 1: just G; Step 2: G+A; Step 3: G+A+B; Step 4+: all
-        point_count = max(0, self._current_step)
-        self._draw_ecdh_curve(highlighted_step=point_count)
+        # Step 1 brings G, step 2 QA, step 3 QB, and steps 4 to 6 the shared S.
+        revealed = min(self._current_step + 1, 4)
+        self._plot.show_curve(self._toy_exchange, revealed=revealed)

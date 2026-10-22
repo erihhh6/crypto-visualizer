@@ -1,4 +1,4 @@
-"""KeyExchangeTab: the narrated DH/ECDH steps and the key-size comparison."""
+"""KeyExchangeTab: the narrated steps, the protocol plot and the comparison."""
 
 from __future__ import annotations
 
@@ -7,8 +7,11 @@ from typing import Any
 import customtkinter as ctk
 import pytest
 
+from gui.exchange_plot import ExchangePlot
 from gui.key_exchange_tab import KeyExchangeTab, StepCard
-from tests.gui.helpers import descendants, find_button, pump
+from modules.key_exchange import Point
+from modules.toy_curve import TOY_CURVE, TOY_GENERATOR, TOY_ORDER
+from tests.gui.helpers import descendants, find_button, label_text, pump, require
 
 
 @pytest.fixture
@@ -70,6 +73,81 @@ def test_private_keys_are_never_shown(
     assert all(
         "[private]" not in line for s, line in named.items() if s not in private_symbols
     )
+
+
+# ---------------------------------------------------------------------------
+# The plot. Each highlighted point is a scatter with a gid: "G", "QA", "QB",
+# "S"; "points" is the whole curve.
+# ---------------------------------------------------------------------------
+
+
+def _plot(tab: Any) -> ExchangePlot:
+    (plot,) = [w for w in descendants(tab) if isinstance(w, ExchangePlot)]
+    return plot
+
+
+def _points(scatter: Any) -> list[Point]:
+    """A scatter's points (matplotlib types its offsets loosely, as ArrayLike)."""
+    return [(round(x), round(y)) for x, y in scatter.get_offsets().tolist()]
+
+
+def _plotted(tab: Any) -> dict[str, list[Point]]:
+    """The plotted points, by gid."""
+    (axes,) = _plot(tab).figure.axes
+    return {str(scatter.get_gid()): _points(scatter) for scatter in axes.collections}
+
+
+def test_the_plot_shows_every_point_of_the_toy_curve(tab: Any) -> None:
+    plotted = _plotted(tab)
+
+    assert sorted(plotted["points"]) == sorted(TOY_CURVE.points())
+    assert plotted["G"] == [TOY_GENERATOR]
+
+
+def test_ecdh_steps_reveal_g_then_qa_then_qb_then_s(tab: Any) -> None:
+    find_button(tab, "Run ECDH").invoke()
+    shown = [set(_plotted(tab)) - {"points"}]
+    for _ in range(5):
+        find_button(tab, "Next").invoke()
+        shown.append(set(_plotted(tab)) - {"points"})
+
+    everything = {"G", "QA", "QB", "S"}
+    assert shown == [
+        {"G"},
+        {"G", "QA"},
+        {"G", "QA", "QB"},
+        everything,  # step 4: Alice computes S
+        everything,
+        everything,
+    ]
+
+
+def test_the_plotted_exchange_is_real_ecdh(tab: Any) -> None:
+    find_button(tab, "Run ECDH").invoke()
+    for _ in range(3):
+        find_button(tab, "Next").invoke()
+    plotted = _plotted(tab)
+    (qa,), (qb,), (s,) = plotted["QA"], plotted["QB"], plotted["S"]
+
+    # On a curve this small, Alice's private key falls to trying every multiple.
+    alice_private = next(
+        k for k in range(1, TOY_ORDER) if TOY_CURVE.multiply(k, TOY_GENERATOR) == qa
+    )
+    assert s == TOY_CURVE.multiply(alice_private, qb)
+
+
+def test_dh_shows_the_message_flow_instead_of_the_curve(tab: Any) -> None:
+    find_button(tab, "Run ECDH").invoke()
+    require("points" in _plotted(tab), "ECDH did not plot the curve")
+
+    find_button(tab, "Run DH").invoke()
+    find_button(tab, "Next").invoke()  # stepping through DH keeps its diagram
+
+    assert _plotted(tab) == {}
+    titles = [
+        label_text(w) for w in descendants(_plot(tab)) if isinstance(w, ctk.CTkLabel)
+    ]
+    assert any("Diffie-Hellman" in title for title in titles)
 
 
 def test_comparison_lists_three_security_levels(tab: Any) -> None:

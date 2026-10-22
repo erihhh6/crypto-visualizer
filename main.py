@@ -21,7 +21,6 @@ _REQUIRED = {
     "customtkinter": "customtkinter>=5.2",
     "PIL": "Pillow>=10.0",
     "matplotlib": "matplotlib>=3.8",
-    "numpy": "numpy>=1.26",
 }
 
 
