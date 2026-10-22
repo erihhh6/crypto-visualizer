@@ -12,8 +12,13 @@ import pytest
 from PIL import Image
 
 from gui.aes_tab import AESTab
+from modules.aes_modes import AesMode, PaddingError, decrypt, encrypt
 from tests.gui.helpers import block_canvas, descendants, find_button, pump, require
 from tests.markers import known_bug
+
+_MESSAGE = "Attack at dawn - more than one 16-byte block"
+_RIGHT_KEY = bytes(16)
+_WRONG_KEY = bytes(15) + b"\x01"
 
 
 @pytest.fixture
@@ -24,27 +29,67 @@ def tab(root: Any) -> Any:
     return widget
 
 
-def _plaintext_entry(tab: Any) -> Any:
+def _entries(tab: Any) -> tuple[Any, Any]:
+    """The plaintext and key fields (created left to right in that order)."""
     entries = [w for w in descendants(tab) if isinstance(w, ctk.CTkEntry)]
     require(len(entries) == 2, f"expected plaintext + key entries, got {len(entries)}")
-    return entries[0]  # created first, left of the key field
+    return entries[0], entries[1]
 
 
-@pytest.mark.parametrize("mode", ["ECB", "CBC", "CTR", "GCM"])
-def test_encrypt_then_decrypt_restores_the_plaintext(tab: Any, mode: str) -> None:
-    message = "Attack at dawn — more than one 16-byte block"
-    entry = _plaintext_entry(tab)
+def _type(entry: Any, text: str) -> None:
+    entry.delete(0, "end")
+    entry.insert(0, text)
+
+
+def _choose_mode(tab: Any, mode: AesMode) -> None:
     (mode_menu,) = [w for w in descendants(tab) if isinstance(w, ctk.CTkOptionMenu)]
     mode_menu.set(mode)
-    entry.delete(0, "end")
-    entry.insert(0, message)
 
+
+def _encrypt_then_decrypt_with(tab: Any, mode: AesMode, decrypt_key: bytes) -> Any:
+    """Encrypt _MESSAGE with _RIGHT_KEY, clear the field, decrypt with *decrypt_key*."""
+    plaintext, key = _entries(tab)
+    _choose_mode(tab, mode)
+    _type(plaintext, _MESSAGE)
+    _type(key, _RIGHT_KEY.hex())
     find_button(tab, "Encrypt").invoke()
     block_canvas(tab)  # the blocks were drawn
-    entry.delete(0, "end")
+    _type(plaintext, "")
+    _type(key, decrypt_key.hex())
     find_button(tab, "Decrypt").invoke()
+    return plaintext
 
-    assert entry.get() == message
+
+@pytest.mark.parametrize("mode", list(AesMode))
+def test_encrypt_then_decrypt_restores_the_plaintext(tab: Any, mode: AesMode) -> None:
+    plaintext = _encrypt_then_decrypt_with(tab, mode, _RIGHT_KEY)
+    assert plaintext.get() == _MESSAGE
+
+
+def test_wrong_key_shows_the_garbled_output_with_a_warning(
+    tab: Any, no_dialogs: list[str]
+) -> None:
+    # A random wrong key passes the padding check 1 time in 256; this pair fails.
+    with pytest.raises(PaddingError):
+        decrypt(encrypt(AesMode.ECB, _MESSAGE.encode(), _RIGHT_KEY), _WRONG_KEY)
+
+    plaintext = _encrypt_then_decrypt_with(tab, AesMode.ECB, _WRONG_KEY)
+
+    assert len(no_dialogs) == 1
+    assert no_dialogs[0].startswith("showwarning: Wrong key")
+    assert plaintext.get() not in ("", _MESSAGE)  # the garbled output is shown
+    no_dialogs.clear()  # the warning was the expected outcome
+
+
+def test_gcm_refuses_to_decrypt_with_a_wrong_key(
+    tab: Any, no_dialogs: list[str]
+) -> None:
+    plaintext = _encrypt_then_decrypt_with(tab, AesMode.GCM, _WRONG_KEY)
+
+    assert len(no_dialogs) == 1
+    assert no_dialogs[0].startswith("showerror: Authentication failed (GCM)")
+    assert plaintext.get() == ""  # GCM releases no output at all
+    no_dialogs.clear()  # the error was the expected outcome
 
 
 def test_detail_panel_shows_a_placeholder_before_any_click(tab: Any) -> None:

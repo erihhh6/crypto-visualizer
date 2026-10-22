@@ -14,19 +14,16 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from cryptography.exceptions import InvalidTag
 from PIL import Image, ImageTk
 
 from modules.aes_modes import (
-    BlockInfo,
-    decrypt_cbc,
-    decrypt_ctr,
-    decrypt_ecb,
-    decrypt_gcm,
-    encrypt_cbc,
-    encrypt_ctr,
-    encrypt_ecb,
-    encrypt_gcm,
+    AesMode,
+    AuthenticationError,
+    Block,
+    EncryptionResult,
+    PaddingError,
+    decrypt,
+    encrypt,
     encrypt_pixels_cbc,
     encrypt_pixels_ecb,
 )
@@ -48,6 +45,19 @@ ARROW_COLOR = "#888888"
 def _abbreviate(hex_text: str, limit: int = 16) -> str:
     """Shorten *hex_text* to *limit* characters plus an ellipsis to fit a block."""
     return hex_text if len(hex_text) <= limit else hex_text[:limit] + "…"
+
+
+def _hex(data: bytes) -> str:
+    return data.hex().upper()
+
+
+# The middle row shows what each mode feeds through AES. ECB has nothing extra
+# to show: its AES input is the plaintext block itself.
+_AES_INPUT_LABEL = {
+    AesMode.CBC: "XOR Input",
+    AesMode.CTR: "Counter",
+    AesMode.GCM: "Counter",
+}
 
 
 class _Tooltip:
@@ -115,7 +125,8 @@ class BlockCanvas(ctk.CTkFrame):
         self._surface.configure(xscrollcommand=self._hscroll.set)
 
         self._tooltip = _Tooltip(self._surface)
-        self._blocks: list[BlockInfo] = []
+        self._mode = AesMode.ECB
+        self._blocks: tuple[Block, ...] = ()
         # Per block index: its rectangles, and the area it covers on the canvas.
         self._block_rects: dict[int, list[int]] = {}
         self._block_bounds: dict[int, tuple[int, int, int, int]] = {}
@@ -132,26 +143,26 @@ class BlockCanvas(ctk.CTkFrame):
     def set_detail_var(self, var: tk.StringVar) -> None:
         self._detail_var = var
 
-    def draw(self, blocks: list[BlockInfo]) -> None:
+    def draw(self, result: EncryptionResult) -> None:
         self._surface.delete("all")
-        self._blocks = blocks
+        self._mode = result.mode
+        self._blocks = result.blocks
         self._block_rects = {}
         self._block_bounds = {}
         self._normal_borders = {}
         self._selected = None
 
-        if not blocks:
+        if not self._blocks:
             return
 
-        mode = blocks[0].mode_label
-        total_w = len(blocks) * (BLOCK_W + BLOCK_GAP) + BLOCK_GAP + 20
+        total_w = len(self._blocks) * (BLOCK_W + BLOCK_GAP) + BLOCK_GAP + 20
         canvas_h = BLOCK_H * 3 + 80
 
         self._surface.configure(scrollregion=(0, 0, total_w, canvas_h))
 
-        for blk in blocks:
+        for blk in self._blocks:
             x0 = BLOCK_GAP + blk.index * (BLOCK_W + BLOCK_GAP)
-            self._draw_block(blk, x0, mode)
+            self._draw_block(blk, x0)
 
     def _rect(self, x0: int, y0: int, fill: str, outline: str) -> int:
         """Draw one block-sized rectangle and remember its normal border."""
@@ -168,7 +179,7 @@ class BlockCanvas(ctk.CTkFrame):
         self._normal_borders[rect] = (outline, width)
         return rect
 
-    def _draw_block(self, blk: BlockInfo, x0: int, mode: str) -> None:
+    def _draw_block(self, blk: Block, x0: int) -> None:
         y_pt = 20
         y_iv = y_pt + BLOCK_H + 18
         y_ct = y_iv + BLOCK_H + 18
@@ -184,29 +195,27 @@ class BlockCanvas(ctk.CTkFrame):
         t1b = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_pt + 28,
-            text=_abbreviate(blk.plaintext_hex),
+            text=_abbreviate(_hex(blk.plaintext)),
             font=("Courier New", 9, "bold"),
             fill="white",
         )
 
-        # IV / XOR / Counter rectangle (hide for ECB)
+        # Middle row: what this mode passed through AES (none for ECB)
         r2 = t2 = t2b = None
-        if mode != "ECB" and blk.iv_or_xor_hex not in ("N/A", ""):
-            label_iv = {"CBC": "XOR Input", "CTR": "Counter", "GCM": "Counter"}.get(
-                mode, "IV"
-            )
+        aes_input_label = _AES_INPUT_LABEL.get(self._mode)
+        if aes_input_label is not None:
             r2 = self._rect(x0, y_iv, fill=COLOUR_IV, outline="#3A8F58")
             t2 = self._surface.create_text(
                 x0 + BLOCK_W // 2,
                 y_iv + 10,
-                text=label_iv,
+                text=aes_input_label,
                 font=("Courier New", 8),
                 fill="white",
             )
             t2b = self._surface.create_text(
                 x0 + BLOCK_W // 2,
                 y_iv + 28,
-                text=_abbreviate(blk.iv_or_xor_hex),
+                text=_abbreviate(_hex(blk.aes_input)),
                 font=("Courier New", 9, "bold"),
                 fill="white",
             )
@@ -222,7 +231,7 @@ class BlockCanvas(ctk.CTkFrame):
         t3b = self._surface.create_text(
             x0 + BLOCK_W // 2,
             y_ct + 28,
-            text=_abbreviate(blk.ciphertext_hex),
+            text=_abbreviate(_hex(blk.ciphertext)),
             font=("Courier New", 9, "bold"),
             fill="white",
         )
@@ -237,7 +246,7 @@ class BlockCanvas(ctk.CTkFrame):
         )
 
         # CBC chaining arrow (only for CBC, between blocks)
-        if mode == "CBC" and blk.index > 0:
+        if self._mode is AesMode.CBC and blk.index > 0:
             self._surface.create_line(
                 x0 - BLOCK_GAP,
                 y_ct + BLOCK_H // 2,
@@ -285,13 +294,12 @@ class BlockCanvas(ctk.CTkFrame):
         idx = self._block_under(event)
         if idx is not None:
             blk = self._blocks[idx]
-            tip = (
-                f"Block {blk.index}  [{blk.mode_label}]\n"
-                f"Plaintext : {blk.plaintext_hex}\n"
-                f"Ciphertext: {blk.ciphertext_hex}\n"
-                f"IV/XOR    : {blk.iv_or_xor_hex}"
+            rows = "\n".join(
+                f"{label:<10}: {value}" for label, value in self._rows(blk)
             )
-            self._tooltip.show(event.x, event.y, tip)
+            self._tooltip.show(
+                event.x, event.y, f"Block {blk.index}  [{self._mode}]\n{rows}"
+            )
         else:
             self._tooltip.hide()
 
@@ -303,12 +311,17 @@ class BlockCanvas(ctk.CTkFrame):
         self._select(idx)
         blk = self._blocks[idx]
         if self._detail_var:
-            self._detail_var.set(
-                f"Block {blk.index} — {blk.mode_label}\n"
-                f"Plaintext :\n  {blk.plaintext_hex}\n"
-                f"Ciphertext:\n  {blk.ciphertext_hex}\n"
-                f"IV / XOR  :\n  {blk.iv_or_xor_hex}"
-            )
+            rows = "\n".join(f"{label}:\n  {value}" for label, value in self._rows(blk))
+            self._detail_var.set(f"Block {blk.index} — {self._mode}\n{rows}")
+
+    def _rows(self, blk: Block) -> list[tuple[str, str]]:
+        """(label, hex value) for each row of *blk*, top to bottom as drawn."""
+        rows = [("Plaintext", _hex(blk.plaintext))]
+        aes_input_label = _AES_INPUT_LABEL.get(self._mode)
+        if aes_input_label is not None:
+            rows.append((aes_input_label, _hex(blk.aes_input)))
+        rows.append(("Ciphertext", _hex(blk.ciphertext)))
+        return rows
 
 
 class AESTab(ctk.CTkFrame):
@@ -320,11 +333,8 @@ class AESTab(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
         # row 2 (comparison) is fixed height — no weight
 
-        self._last_ciphertext: bytes | None = None
-        self._last_iv: bytes | None = None
-        self._last_nonce: bytes | None = None
-        self._last_tag: bytes | None = None
-        self._last_mode: str = "ECB"
+        # The latest encryption: ciphertext, IV/tag and mode, kept for Decrypt.
+        self._last_result: EncryptionResult | None = None
 
         self._build_controls()
         self._build_main_area()
@@ -367,10 +377,10 @@ class AESTab(ctk.CTkFrame):
 
         # Mode selector
         ctk.CTkLabel(ctrl, text="Mode:").grid(row=0, column=4, padx=(8, 2))
-        self._mode_var = tk.StringVar(value="ECB")
+        self._mode_var = tk.StringVar(value=AesMode.ECB)
         self._mode_menu = ctk.CTkOptionMenu(
             ctrl,
-            values=["ECB", "CBC", "CTR", "GCM"],
+            values=[mode.value for mode in AesMode],
             variable=self._mode_var,
             width=100,
         )
@@ -531,8 +541,8 @@ class AESTab(ctk.CTkFrame):
             font=ctk.CTkFont(size=12, weight="bold"),
         ).grid(row=0, column=0, columnspan=4, sticky="w", padx=8, pady=(6, 2))
 
-        self._comp_vars: dict[str, tk.StringVar] = {}
-        for col, mode in enumerate(["ECB", "CBC", "CTR", "GCM"]):
+        self._comp_vars: dict[AesMode, tk.StringVar] = {}
+        for col, mode in enumerate(AesMode):
             f = ctk.CTkFrame(comp, fg_color="#2A2A3E")
             f.grid(row=1, column=col, padx=4, pady=(0, 6), sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -542,10 +552,10 @@ class AESTab(ctk.CTkFrame):
                 text=mode,
                 font=ctk.CTkFont(family="Courier New", size=12, weight="bold"),
                 text_color={
-                    "ECB": "#E07B39",
-                    "CBC": "#5B9BD5",
-                    "CTR": "#5BAD72",
-                    "GCM": "#9B59B6",
+                    AesMode.ECB: "#E07B39",
+                    AesMode.CBC: "#5B9BD5",
+                    AesMode.CTR: "#5BAD72",
+                    AesMode.GCM: "#9B59B6",
                 }[mode],
             ).grid(row=0, column=0, padx=6, pady=(6, 2), sticky="w")
 
@@ -591,37 +601,15 @@ class AESTab(ctk.CTkFrame):
                 )
                 return
 
-            mode = self._mode_var.get()
-            self._last_mode = mode
-
-            if mode == "ECB":
-                ct, blocks = encrypt_ecb(plaintext, key)
-                self._last_ciphertext = ct
-                self._last_iv = None
-            elif mode == "CBC":
-                iv_ct, blocks = encrypt_cbc(plaintext, key)
-                self._last_iv = iv_ct[:16]
-                self._last_ciphertext = iv_ct[16:]
-            elif mode == "CTR":
-                n_ct, blocks = encrypt_ctr(plaintext, key)
-                self._last_nonce = n_ct[:16]
-                self._last_ciphertext = n_ct[16:]
-            elif mode == "GCM":
-                n_ct, tag, blocks = encrypt_gcm(plaintext, key)
-                self._last_nonce = n_ct[:12]
-                self._last_ciphertext = n_ct[12:]
-                self._last_tag = tag
-            else:
-                return
-
-            self._block_canvas.draw(blocks)
+            self._last_result = encrypt(AesMode(self._mode_var.get()), plaintext, key)
+            self._block_canvas.draw(self._last_result)
             self._update_comparison(plaintext, key)
 
         except Exception as exc:
             messagebox.showerror("Encryption error", str(exc))
 
     def _do_decrypt(self) -> None:
-        if self._last_ciphertext is None:
+        if self._last_result is None:
             messagebox.showinfo("Nothing to decrypt", "Encrypt something first.")
             return
         try:
@@ -646,75 +634,38 @@ class AESTab(ctk.CTkFrame):
                 )
                 return
 
-            mode = self._last_mode
             try:
-                if mode == "ECB":
-                    pt = decrypt_ecb(self._last_ciphertext, key)
-                elif mode == "CBC":
-                    pt = decrypt_cbc(self._last_ciphertext, key, self._last_iv)
-                elif mode == "CTR":
-                    pt = decrypt_ctr(self._last_ciphertext, key, self._last_nonce)
-                elif mode == "GCM":
-                    pt = decrypt_gcm(
-                        self._last_ciphertext, key, self._last_nonce, self._last_tag
-                    )
-                else:
-                    return
-                self._input_var.set(pt.decode("utf-8", errors="replace"))
-
-            except ValueError as exc:
-                if "padding" in str(exc).lower():
-                    # Wrong key → PKCS7 unpadding fails on garbage bytes.
-                    # Show the raw garbled output so the user sees what the wrong
-                    # key actually produces — the educational point of the demo.
-                    if mode == "ECB":
-                        raw = decrypt_ecb(self._last_ciphertext, key, strict=False)
-                    else:  # CBC
-                        raw = decrypt_cbc(
-                            self._last_ciphertext, key, self._last_iv, strict=False
-                        )
-                    self._input_var.set(raw.decode("utf-8", errors="replace"))
-                    messagebox.showwarning(
-                        "Wrong key",
-                        "Padding check failed — the key is incorrect.\n\n"
-                        "The garbled output has been placed in the plaintext field\n"
-                        "so you can see what the wrong key produces.",
-                    )
-                else:
-                    messagebox.showerror("Decryption error", str(exc))
-
-            except Exception as exc:
-                # GCM raises InvalidTag (empty message) when the key is wrong.
-                if isinstance(exc, InvalidTag):
-                    messagebox.showerror(
-                        "Authentication failed (GCM)",
-                        "The authentication tag does not match.\n\n"
-                        "This means the key is wrong or the ciphertext was "
-                        "tampered with.\n"
-                        "GCM refuses to return any output at all — this is exactly\n"
-                        "why authenticated encryption is safer than ECB or CBC.",
-                    )
-                else:
-                    messagebox.showerror("Decryption error", str(exc) or repr(exc))
+                plaintext = decrypt(self._last_result, key)
+            except PaddingError as exc:
+                # Show the garbled output so the user sees what the wrong key
+                # actually produces: the educational point of the demo.
+                self._input_var.set(exc.raw.decode("utf-8", errors="replace"))
+                messagebox.showwarning(
+                    "Wrong key",
+                    "Padding check failed — the key is incorrect.\n\n"
+                    "The garbled output has been placed in the plaintext field\n"
+                    "so you can see what the wrong key produces.",
+                )
+                return
+            except AuthenticationError:
+                messagebox.showerror(
+                    "Authentication failed (GCM)",
+                    "The authentication tag does not match.\n\n"
+                    "This means the key is wrong or the ciphertext was "
+                    "tampered with.\n"
+                    "GCM refuses to return any output at all — this is exactly\n"
+                    "why authenticated encryption is safer than ECB or CBC.",
+                )
+                return
+            self._input_var.set(plaintext.decode("utf-8", errors="replace"))
 
         except Exception as exc:
             messagebox.showerror("Decryption error", str(exc))
 
     def _update_comparison(self, plaintext: bytes, key: bytes) -> None:
-        ops = {
-            "ECB": lambda: encrypt_ecb(plaintext, key),
-            "CBC": lambda: encrypt_cbc(plaintext, key),
-            "CTR": lambda: encrypt_ctr(plaintext, key),
-            "GCM": lambda: encrypt_gcm(plaintext, key),
-        }
-        for mode, fn in ops.items():
-            try:
-                ct_data = fn()[0]
-                ct_hex = ct_data.hex().upper()
-                display = ct_hex[:64] + ("…" if len(ct_hex) > 64 else "")
-                self._comp_vars[mode].set(display)
-            except Exception:
-                self._comp_vars[mode].set("(error)")
+        for mode, var in self._comp_vars.items():
+            ct_hex = _hex(encrypt(mode, plaintext, key).ciphertext)
+            var.set(ct_hex[:64] + ("…" if len(ct_hex) > 64 else ""))
 
     # ------------------------------------------------------------------
     # Image ECB demo

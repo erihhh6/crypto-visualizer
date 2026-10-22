@@ -78,7 +78,7 @@ failures) until the commit that fixes them removes the marker.
 crypto-visualizer/
 ├── main.py                    # Entry point
 ├── modules/
-│   ├── aes_modes.py           # AES ECB/CBC/CTR/GCM + BlockInfo metadata
+│   ├── aes_modes.py           # AES ECB/CBC/CTR/GCM encrypt/decrypt + per-block detail
 │   └── key_exchange.py        # DH + ECDH step-by-step + comparison
 ├── gui/
 │   ├── main_window.py         # CustomTkinter window + tab view

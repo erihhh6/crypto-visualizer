@@ -10,7 +10,7 @@ import customtkinter as ctk
 import pytest
 
 from gui.aes_tab import BlockCanvas
-from modules.aes_modes import encrypt_ecb
+from modules.aes_modes import AesMode, encrypt
 from tests.gui.helpers import (
     block_canvas,
     descendants,
@@ -26,8 +26,7 @@ def canvas(root: Any) -> tk.Canvas:
     """A BlockCanvas filling the window, showing three ECB blocks."""
     widget = BlockCanvas(root)
     widget.pack(fill="both", expand=True)
-    _, blocks = encrypt_ecb(b"A" * 40, os.urandom(16))
-    widget.draw(blocks)
+    widget.draw(encrypt(AesMode.ECB, b"A" * 40, os.urandom(16)))
     pump(root)
     return block_canvas(widget)
 
@@ -81,6 +80,25 @@ def _visible_tooltip_text(root: Any) -> str:
     labels = [w for w in descendants(shown[0]) if isinstance(w, tk.Label)]
     require(len(labels) == 1, "tooltip window has no single text label")
     return str(labels[0].cget("text"))
+
+
+@pytest.mark.parametrize(
+    ("mode", "rows"),
+    [(AesMode.ECB, 2), (AesMode.CBC, 3), (AesMode.CTR, 3), (AesMode.GCM, 3)],
+)
+def test_middle_row_only_where_aes_input_differs_from_plaintext(
+    root: Any, mode: AesMode, rows: int
+) -> None:
+    """ECB feeds the plaintext itself through AES, so it has no middle row."""
+    widget = BlockCanvas(root)
+    widget.pack(fill="both", expand=True)
+    widget.draw(encrypt(mode, b"A" * 40, os.urandom(16)))
+    pump(root)
+    surface = block_canvas(widget)
+    x = _block_center_x(surface, 0)
+
+    drawn = surface.find_overlapping(x, 0, x, surface.winfo_height())
+    assert sum(item_type(surface, item) == "rectangle" for item in drawn) == rows
 
 
 def test_deselected_block_gets_its_border_back(canvas: tk.Canvas) -> None:
