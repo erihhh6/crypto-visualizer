@@ -13,7 +13,15 @@ from PIL import Image
 
 from gui.aes_tab import AESTab
 from modules.aes_modes import AesMode, PaddingError, decrypt, encrypt
-from tests.gui.helpers import block_canvas, descendants, find_button, pump, require
+from tests.gui.helpers import (
+    block_canvas,
+    click_block,
+    descendants,
+    find_button,
+    label_text,
+    pump,
+    require,
+)
 from tests.markers import known_bug
 
 _MESSAGE = "Attack at dawn - more than one 16-byte block"
@@ -52,13 +60,19 @@ def _choose_mode(tab: Any, mode: AesMode) -> None:
     mode_menu.set(mode)
 
 
-def _encrypt_then_decrypt_with(tab: Any, mode: AesMode, decrypt_key: bytes) -> _Fields:
-    """Encrypt _MESSAGE with _RIGHT_KEY, then decrypt with *decrypt_key*."""
+def _encrypt(tab: Any, mode: AesMode) -> _Fields:
+    """Encrypt _MESSAGE with _RIGHT_KEY in *mode*."""
     fields = _fields(tab)
     _choose_mode(tab, mode)
     _type(fields.plaintext, _MESSAGE)
     _type(fields.key, _RIGHT_KEY.hex())
     find_button(tab, "Encrypt").invoke()
+    return fields
+
+
+def _encrypt_then_decrypt_with(tab: Any, mode: AesMode, decrypt_key: bytes) -> _Fields:
+    """Encrypt _MESSAGE with _RIGHT_KEY, then decrypt with *decrypt_key*."""
+    fields = _encrypt(tab, mode)
     block_canvas(tab)  # the blocks were drawn
     _type(fields.key, decrypt_key.hex())
     find_button(tab, "Decrypt").invoke()
@@ -142,10 +156,35 @@ def test_an_empty_key_field_gets_a_fresh_aes128_key(tab: Any) -> None:
     assert len(bytes.fromhex(fields.key.get())) == 16
 
 
-def test_detail_panel_shows_a_placeholder_before_any_click(tab: Any) -> None:
+def _details(tab: Any) -> str:
+    """Text of the read-only panel that describes the clicked block."""
     panels = [w for w in descendants(tab) if isinstance(w, tk.Text)]
     require(len(panels) == 1, f"expected one detail panel, found {len(panels)}")
-    assert panels[0].get("1.0", "end-1c").strip()
+    return str(panels[0].get("1.0", "end-1c"))
+
+
+def test_detail_panel_shows_a_placeholder_before_any_click(tab: Any) -> None:
+    assert _details(tab).strip()
+
+
+def test_clicking_a_block_shows_its_details(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC)
+
+    click_block(block_canvas(tab), 1)
+
+    details = _details(tab)
+    assert details.startswith("Block 1 — CBC")
+    assert _MESSAGE.encode()[16:32].hex().upper() in details
+
+
+def test_encrypting_fills_the_comparison_for_every_mode(tab: Any) -> None:
+    _encrypt(tab, AesMode.CBC)
+
+    shown = [label_text(w) for w in descendants(tab) if isinstance(w, ctk.CTkLabel)]
+    assert "(no data)" not in shown
+    # ECB has no IV, so its ciphertext for this key is known in advance.
+    ecb = encrypt(AesMode.ECB, _MESSAGE.encode(), _RIGHT_KEY).ciphertext.hex().upper()
+    assert ecb[:64] + "…" in shown
 
 
 def _load_image(

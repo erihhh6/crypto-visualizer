@@ -62,6 +62,16 @@ def item_option(canvas: tk.Canvas, item: int, option: str) -> str:
     return str(canvas.itemcget(item, option))  # type: ignore[no-untyped-call]
 
 
+def label_text(label: Any) -> str:
+    """The text a CTkLabel shows, whether set directly or through a variable."""
+    # cget returns the variable's Tcl name (a Tcl_Obj, not a tk.Variable),
+    # or "" when the label has no variable.
+    variable = str(label.cget("textvariable"))
+    if variable:
+        return str(label.getvar(variable))
+    return str(label.cget("text"))
+
+
 def find_button(widget: tk.Misc, label: str) -> Any:
     """Return the one CTkButton under *widget* whose text contains *label*."""
     matches = [
@@ -86,6 +96,40 @@ def block_canvas(widget: tk.Misc) -> tk.Canvas:
     ]
     require(len(matches) == 1, f"expected one block canvas, found {len(matches)}")
     return matches[0]
+
+
+def block_center_x(canvas: tk.Canvas, index: int) -> int:
+    """Horizontal centre of block *index*, read from its "Block N" caption."""
+    captions = [
+        item
+        for item in canvas.find_all()
+        if item_type(canvas, item) == "text"
+        and item_option(canvas, item, "text") == f"Block {index}"
+    ]
+    require(len(captions) == 1, f"no caption for block {index}")
+    return int(canvas.coords(captions[0])[0])
+
+
+def plaintext_rect(canvas: tk.Canvas, index: int) -> int:
+    """The top rectangle (plaintext) of block *index*."""
+    x = block_center_x(canvas, index)
+    rects = [
+        item
+        for item in canvas.find_overlapping(x, 0, x, canvas.winfo_height())
+        if item_type(canvas, item) == "rectangle"
+    ]
+    require(bool(rects), f"no rectangles drawn for block {index}")
+    return min(rects, key=lambda item: canvas.coords(item)[1])
+
+
+def plaintext_center(canvas: tk.Canvas, index: int) -> tuple[int, int]:
+    x0, y0, x1, y1 = canvas.coords(plaintext_rect(canvas, index))
+    return int((x0 + x1) / 2), int((y0 + y1) / 2)
+
+
+def click_block(canvas: tk.Canvas, index: int) -> None:
+    x, y = plaintext_center(canvas, index)
+    canvas.event_generate("<Button-1>", x=x, y=y)
 
 
 def run_app_script(code: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
@@ -160,11 +204,7 @@ def low_contrast_labels(window: tk.Misc, minimum: float) -> list[str]:
     for label in descendants(window):
         if not isinstance(label, ctk.CTkLabel):
             continue
-        variable = label.cget("textvariable")
-        if isinstance(variable, tk.Variable):
-            text = str(label.getvar(str(variable)))
-        else:
-            text = str(label.cget("text"))
+        text = label_text(label)
         if not text.strip():
             continue
         foreground = _for_current_mode(label.cget("text_color"))

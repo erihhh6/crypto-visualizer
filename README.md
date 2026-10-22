@@ -82,7 +82,12 @@ crypto-visualizer/
 │   └── key_exchange.py        # DH + ECDH step-by-step + comparison
 ├── gui/
 │   ├── main_window.py         # CustomTkinter window + tab view
-│   ├── aes_tab.py             # Block canvas, ECB image demo, comparison panel
+│   ├── aes_tab.py             # AES tab: controls, encrypt/decrypt, panel layout
+│   ├── block_canvas.py        # Per-block diagram with hover tooltips and details
+│   ├── image_demo.py          # ECB vs CBC on an image's pixels
+│   ├── mode_comparison.py     # One plaintext under all four modes
+│   ├── tooltip.py             # Pointer-following tooltip window
+│   ├── palette.py             # Colours shared between widgets
 │   └── key_exchange_tab.py    # Step animator, matplotlib curve, comparison table
 ├── assets/
 │   └── sample.bmp             # Test image for ECB attack demo
