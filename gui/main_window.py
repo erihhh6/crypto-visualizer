@@ -9,12 +9,15 @@ lighter-gray content box as the tab content — matching the expected look.
 from __future__ import annotations
 
 import os
+
 import customtkinter as ctk
 
 from gui.aes_tab import AESTab
 from gui.key_exchange_tab import KeyExchangeTab
 
-_ICON_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.ico")
+_ICON_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "assets", "icon.ico"
+)
 
 
 ctk.set_appearance_mode("System")
@@ -94,8 +97,3 @@ class MainWindow(ctk.CTk):
         else:
             self.aes_tab.grid_remove()
             self.key_tab.grid()
-
-
-if __name__ == "__main__":
-    app = MainWindow()
-    app.mainloop()

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 
-
 # ---------------------------------------------------------------------------
 # Dependency check — gives a clear message instead of a raw ImportError
 # ---------------------------------------------------------------------------
@@ -20,9 +19,9 @@ import sys
 _REQUIRED = {
     "cryptography": "cryptography>=42.0",
     "customtkinter": "customtkinter>=5.2",
-    "PIL":           "Pillow>=10.0",
-    "matplotlib":    "matplotlib>=3.8",
-    "numpy":         "numpy>=1.26",
+    "PIL": "Pillow>=10.0",
+    "matplotlib": "matplotlib>=3.8",
+    "numpy": "numpy>=1.26",
 }
 
 
@@ -51,6 +50,7 @@ def _check_dependencies() -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     _check_dependencies()

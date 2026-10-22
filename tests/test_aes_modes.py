@@ -12,27 +12,29 @@ Covers:
 from __future__ import annotations
 
 import os
+
 import pytest
+from cryptography.exceptions import InvalidTag
 
 from modules.aes_modes import (
+    BLOCK_SIZE,
     BlockInfo,
-    encrypt_ecb,
-    encrypt_cbc,
-    encrypt_ctr,
-    encrypt_gcm,
-    decrypt_ecb,
     decrypt_cbc,
     decrypt_ctr,
+    decrypt_ecb,
     decrypt_gcm,
-    encrypt_pixels_ecb,
+    encrypt_cbc,
+    encrypt_ctr,
+    encrypt_ecb,
+    encrypt_gcm,
     encrypt_pixels_cbc,
-    BLOCK_SIZE,
+    encrypt_pixels_ecb,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def key128() -> bytes:
@@ -59,10 +61,11 @@ def plaintext() -> bytes:
 # AES-128-ECB: one block, known key and plaintext
 # ---------------------------------------------------------------------------
 
+
 def test_nist_ecb_known_answer() -> None:
     """Encrypt the FIPS 197 Appendix B test vector with ECB and verify."""
     key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
-    pt  = bytes.fromhex("3243f6a8885a308d313198a2e0370734")
+    pt = bytes.fromhex("3243f6a8885a308d313198a2e0370734")
     expected_ct = bytes.fromhex("3925841d02dc09fbdc118597196a0b32")
 
     ct, blocks = encrypt_ecb(pt, key)
@@ -75,6 +78,7 @@ def test_nist_ecb_known_answer() -> None:
 # ---------------------------------------------------------------------------
 # Round-trip tests
 # ---------------------------------------------------------------------------
+
 
 class TestECB:
     def test_roundtrip(self, key128: bytes, plaintext: bytes) -> None:
@@ -99,8 +103,8 @@ class TestECB:
         """ECB's defining weakness: equal plaintext blocks → equal ciphertext blocks."""
         block = b"AAAAAAAAAAAAAAAA"  # exactly 16 bytes
         pt = block * 3
-        ct, blocks = encrypt_ecb(pt, key128)
-        assert blocks[0].ciphertext_hex == blocks[1].ciphertext_hex == blocks[2].ciphertext_hex
+        _, blocks = encrypt_ecb(pt, key128)
+        assert len({blk.ciphertext_hex for blk in blocks[:3]}) == 1
 
     def test_block_indices(self, key128: bytes, plaintext: bytes) -> None:
         _, blocks = encrypt_ecb(plaintext, key128)
@@ -108,7 +112,7 @@ class TestECB:
             assert blk.index == i
 
     def test_invalid_key_raises(self, plaintext: bytes) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Key must be 16, 24, or 32 bytes"):
             encrypt_ecb(plaintext, b"tooshort")
 
 
@@ -182,7 +186,6 @@ class TestGCM:
         assert len(tag) == 16
 
     def test_tampered_tag_rejected(self, key128: bytes, plaintext: bytes) -> None:
-        from cryptography.exceptions import InvalidTag
         n_ct, tag, _ = encrypt_gcm(plaintext, key128)
         nonce, ct = n_ct[:12], n_ct[12:]
         bad_tag = bytes([tag[0] ^ 0xFF]) + tag[1:]
@@ -201,6 +204,7 @@ class TestGCM:
 # ---------------------------------------------------------------------------
 # Pixel encrypt helpers
 # ---------------------------------------------------------------------------
+
 
 class TestPixelHelpers:
     def test_ecb_output_length(self, key128: bytes) -> None:

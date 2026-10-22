@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import os
 import struct
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
 
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
-
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 BLOCK_SIZE = 16  # AES block size in bytes
 
@@ -25,15 +23,16 @@ class BlockInfo:
     """Metadata for a single 16-byte AES block, consumed by the visualizer."""
 
     index: int
-    plaintext_hex: str      # plaintext block as hex string
-    ciphertext_hex: str     # ciphertext block as hex string
-    iv_or_xor_hex: str      # IV, XOR value, or counter block as hex string
-    mode_label: str         # "ECB", "CBC", "CTR", "GCM"
+    plaintext_hex: str  # plaintext block as hex string
+    ciphertext_hex: str  # ciphertext block as hex string
+    iv_or_xor_hex: str  # IV, XOR value, or counter block as hex string
+    mode_label: str  # "ECB", "CBC", "CTR", "GCM"
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _pad(data: bytes) -> bytes:
     """Apply PKCS7 padding to reach a multiple of BLOCK_SIZE."""
@@ -47,13 +46,13 @@ def _unpad(data: bytes) -> bytes:
     return unpadder.update(data) + unpadder.finalize()
 
 
-def _split_blocks(data: bytes) -> List[bytes]:
+def _split_blocks(data: bytes) -> list[bytes]:
     """Split *data* into 16-byte blocks (data must already be padded)."""
     return [data[i : i + BLOCK_SIZE] for i in range(0, len(data), BLOCK_SIZE)]
 
 
 def _xor_bytes(a: bytes, b: bytes) -> bytes:
-    return bytes(x ^ y for x, y in zip(a, b))
+    return bytes(x ^ y for x, y in zip(a, b, strict=True))
 
 
 def _validate_key(key: bytes) -> None:
@@ -64,6 +63,7 @@ def _validate_key(key: bytes) -> None:
 # ---------------------------------------------------------------------------
 # Encrypt functions
 # ---------------------------------------------------------------------------
+
 
 def encrypt_ecb(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
     """
@@ -87,7 +87,7 @@ def encrypt_ecb(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
     ct_blocks = _split_blocks(ciphertext)
 
     blocks: list[BlockInfo] = []
-    for i, (pt, ct) in enumerate(zip(pt_blocks, ct_blocks)):
+    for i, (pt, ct) in enumerate(zip(pt_blocks, ct_blocks, strict=True)):
         blocks.append(
             BlockInfo(
                 index=i,
@@ -123,7 +123,7 @@ def encrypt_cbc(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
 
     blocks: list[BlockInfo] = []
     prev = iv
-    for i, (pt, ct) in enumerate(zip(pt_blocks, ct_blocks)):
+    for i, (pt, ct) in enumerate(zip(pt_blocks, ct_blocks, strict=True)):
         xor_input = _xor_bytes(pt, prev)
         blocks.append(
             BlockInfo(
@@ -164,7 +164,7 @@ def encrypt_ctr(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
     ]
 
     blocks: list[BlockInfo] = []
-    for i, (pt, ct) in enumerate(zip(pt_blocks_raw, ct_blocks_raw)):
+    for i, (pt, ct) in enumerate(zip(pt_blocks_raw, ct_blocks_raw, strict=True)):
         # Counter block = nonce[:8] || big-endian counter
         counter_block = nonce[:8] + struct.pack(">Q", i)
         blocks.append(
@@ -179,9 +179,7 @@ def encrypt_ctr(plaintext: bytes, key: bytes) -> tuple[bytes, list[BlockInfo]]:
     return nonce + ciphertext, blocks
 
 
-def encrypt_gcm(
-    plaintext: bytes, key: bytes
-) -> tuple[bytes, bytes, list[BlockInfo]]:
+def encrypt_gcm(plaintext: bytes, key: bytes) -> tuple[bytes, bytes, list[BlockInfo]]:
     """
     Encrypt *plaintext* with AES-GCM.
 
@@ -209,7 +207,7 @@ def encrypt_gcm(
     ]
 
     blocks: list[BlockInfo] = []
-    for i, (pt, ct) in enumerate(zip(pt_blocks_raw, ct_blocks_raw)):
+    for i, (pt, ct) in enumerate(zip(pt_blocks_raw, ct_blocks_raw, strict=True)):
         counter_block = nonce + struct.pack(">I", i + 2)  # GCM counter starts at 2
         blocks.append(
             BlockInfo(
@@ -226,6 +224,7 @@ def encrypt_gcm(
 # ---------------------------------------------------------------------------
 # Decrypt functions
 # ---------------------------------------------------------------------------
+
 
 def decrypt_ecb(ciphertext: bytes, key: bytes, strict: bool = True) -> bytes:
     """
@@ -270,9 +269,7 @@ def decrypt_ctr(ciphertext: bytes, key: bytes, nonce: bytes) -> bytes:
     return decryptor.update(ciphertext) + decryptor.finalize()
 
 
-def decrypt_gcm(
-    ciphertext: bytes, key: bytes, nonce: bytes, tag: bytes
-) -> bytes:
+def decrypt_gcm(ciphertext: bytes, key: bytes, nonce: bytes, tag: bytes) -> bytes:
     """Decrypt and verify AES-GCM ciphertext (without nonce prefix)."""
     _validate_key(key)
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
@@ -283,8 +280,6 @@ def decrypt_gcm(
 # ---------------------------------------------------------------------------
 # ECB image attack
 # ---------------------------------------------------------------------------
-
-BMP_HEADER_SIZE = 54  # standard BMP header length in bytes
 
 
 def encrypt_pixels_ecb(pixel_bytes: bytes, key: bytes) -> bytes:
@@ -314,82 +309,3 @@ def encrypt_pixels_cbc(pixel_bytes: bytes, key: bytes) -> bytes:
     cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
     encryptor = cipher.encryptor()
     return (encryptor.update(padded) + encryptor.finalize())[: len(pixel_bytes)]
-
-
-def encrypt_image_ecb(image_path: str, key: bytes) -> tuple[bytes, bytes]:
-    """
-    Demonstrate the ECB "penguin attack" on a BMP image.
-
-    The BMP header is preserved so the result remains openable as an image.
-    The pixel data is encrypted block-by-block in ECB mode, revealing
-    structural patterns in the ciphertext.
-
-    Parameters
-    ----------
-    image_path : str
-        Path to a BMP file.
-    key : bytes
-        AES key (16, 24, or 32 bytes).
-
-    Returns
-    -------
-    encrypted_bytes : bytes
-        BMP header + ECB-encrypted pixel data (padded).
-    original_bytes : bytes
-        Raw BMP file bytes for comparison.
-    """
-    _validate_key(key)
-    with open(image_path, "rb") as fh:
-        raw = fh.read()
-
-    original_bytes = raw
-    header = raw[:BMP_HEADER_SIZE]
-    pixel_data = raw[BMP_HEADER_SIZE:]
-
-    padded_pixels = _pad(pixel_data)
-    cipher = Cipher(algorithms.AES(key), modes.ECB())
-    encryptor = cipher.encryptor()
-    encrypted_pixels = encryptor.update(padded_pixels) + encryptor.finalize()
-
-    # Trim back to original pixel_data length to keep dimensions intact
-    encrypted_pixels = encrypted_pixels[: len(pixel_data)]
-    encrypted_bytes = header + encrypted_pixels
-    return encrypted_bytes, original_bytes
-
-
-# ---------------------------------------------------------------------------
-# Self-test
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    key = os.urandom(16)
-    plaintext = b"Hello, Crypto World! This is a test message for AES modes."
-
-    print("=== ECB ===")
-    ct, blocks = encrypt_ecb(plaintext, key)
-    pt = decrypt_ecb(ct, key)
-    assert pt == plaintext, "ECB round-trip failed"
-    print(f"  Blocks: {len(blocks)}, first block: {blocks[0].ciphertext_hex[:16]}...")
-
-    print("=== CBC ===")
-    iv_ct, blocks = encrypt_cbc(plaintext, key)
-    iv, ct = iv_ct[:16], iv_ct[16:]
-    pt = decrypt_cbc(ct, key, iv)
-    assert pt == plaintext, "CBC round-trip failed"
-    print(f"  Blocks: {len(blocks)}, IV: {iv.hex().upper()[:16]}...")
-
-    print("=== CTR ===")
-    nonce_ct, blocks = encrypt_ctr(plaintext, key)
-    nonce, ct = nonce_ct[:16], nonce_ct[16:]
-    pt = decrypt_ctr(ct, key, nonce)
-    assert pt == plaintext, "CTR round-trip failed"
-    print(f"  Blocks: {len(blocks)}, nonce: {nonce.hex().upper()}")
-
-    print("=== GCM ===")
-    nonce_ct, tag, blocks = encrypt_gcm(plaintext, key)
-    nonce, ct = nonce_ct[:12], nonce_ct[12:]
-    pt = decrypt_gcm(ct, key, nonce, tag)
-    assert pt == plaintext, "GCM round-trip failed"
-    print(f"  Blocks: {len(blocks)}, tag: {tag.hex().upper()}")
-
-    print("\nAll AES mode tests passed.")

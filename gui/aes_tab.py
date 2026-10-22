@@ -9,41 +9,46 @@ Layout (top-to-bottom, left-to-right):
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from typing import Optional
 
 import customtkinter as ctk
+from cryptography.exceptions import InvalidTag
 from PIL import Image, ImageTk
 
 from modules.aes_modes import (
     BlockInfo,
-    encrypt_ecb,
-    encrypt_cbc,
-    encrypt_ctr,
-    encrypt_gcm,
-    decrypt_ecb,
     decrypt_cbc,
     decrypt_ctr,
+    decrypt_ecb,
     decrypt_gcm,
-    encrypt_pixels_ecb,
+    encrypt_cbc,
+    encrypt_ctr,
+    encrypt_ecb,
+    encrypt_gcm,
     encrypt_pixels_cbc,
+    encrypt_pixels_ecb,
 )
-
 
 # ---------------------------------------------------------------------------
 # Colour palette
 # ---------------------------------------------------------------------------
-COLOUR_PT   = "#5B9BD5"   # plaintext  → blue
-COLOUR_CT   = "#E07B39"   # ciphertext → orange
-COLOUR_IV   = "#5BAD72"   # IV / XOR   → green
-COLOUR_SEL  = "#C0392B"   # selected   → red outline
-COLOUR_BG   = "#1E1E2E"
-BLOCK_W     = 130         # block rectangle width
-BLOCK_H     = 54          # block rectangle height
-BLOCK_GAP   = 14          # horizontal gap between blocks
+COLOUR_PT = "#5B9BD5"  # plaintext  → blue
+COLOUR_CT = "#E07B39"  # ciphertext → orange
+COLOUR_IV = "#5BAD72"  # IV / XOR   → green
+COLOUR_SEL = "#C0392B"  # selected   → red outline
+COLOUR_BG = "#1E1E2E"
+BLOCK_W = 130  # block rectangle width
+BLOCK_H = 54  # block rectangle height
+BLOCK_GAP = 14  # horizontal gap between blocks
 ARROW_COLOR = "#888888"
+
+
+def _abbreviate(hex_text: str, limit: int = 16) -> str:
+    """Shorten *hex_text* to *limit* characters plus an ellipsis to fit a block."""
+    return hex_text if len(hex_text) <= limit else hex_text[:limit] + "…"
 
 
 class _Tooltip:
@@ -51,7 +56,7 @@ class _Tooltip:
 
     def __init__(self, canvas: tk.Canvas) -> None:
         self._canvas = canvas
-        self._win: Optional[tk.Toplevel] = None
+        self._win: tk.Toplevel | None = None
 
     def show(self, x: int, y: int, text: str) -> None:
         self.hide()
@@ -102,14 +107,14 @@ class BlockCanvas(ctk.CTkFrame):
 
         self._tooltip = _Tooltip(self._canvas)
         self._blocks: list[BlockInfo] = []
-        self._selected: Optional[int] = None
+        self._selected: int | None = None
         self._block_ids: dict[int, list[int]] = {}  # index → [rect_id, ...]
 
         self._canvas.bind("<Motion>", self._on_motion)
         self._canvas.bind("<Leave>", lambda _e: self._tooltip.hide())
         self._canvas.bind("<Button-1>", self._on_click)
 
-        self._detail_var: Optional[tk.StringVar] = None
+        self._detail_var: tk.StringVar | None = None
 
     def set_detail_var(self, var: tk.StringVar) -> None:
         self._detail_var = var
@@ -134,25 +139,31 @@ class BlockCanvas(ctk.CTkFrame):
             self._draw_block(blk, x0, mode)
 
     def _draw_block(self, blk: BlockInfo, x0: int, mode: str) -> None:
-        ids: list[int] = []
-        y_pt  = 20
-        y_iv  = y_pt + BLOCK_H + 18
-        y_ct  = y_iv + BLOCK_H + 18
+        y_pt = 20
+        y_iv = y_pt + BLOCK_H + 18
+        y_ct = y_iv + BLOCK_H + 18
 
         # Plaintext rectangle
         r1 = self._canvas.create_rectangle(
-            x0, y_pt, x0 + BLOCK_W, y_pt + BLOCK_H,
-            fill=COLOUR_PT, outline="#3A79B0", width=2,
+            x0,
+            y_pt,
+            x0 + BLOCK_W,
+            y_pt + BLOCK_H,
+            fill=COLOUR_PT,
+            outline="#3A79B0",
+            width=2,
         )
         t1 = self._canvas.create_text(
-            x0 + BLOCK_W // 2, y_pt + 10,
+            x0 + BLOCK_W // 2,
+            y_pt + 10,
             text="Plaintext",
             font=("Courier New", 8),
             fill="white",
         )
         t1b = self._canvas.create_text(
-            x0 + BLOCK_W // 2, y_pt + 28,
-            text=blk.plaintext_hex[:16] + "…" if len(blk.plaintext_hex) > 16 else blk.plaintext_hex,
+            x0 + BLOCK_W // 2,
+            y_pt + 28,
+            text=_abbreviate(blk.plaintext_hex),
             font=("Courier New", 9, "bold"),
             fill="white",
         )
@@ -160,45 +171,62 @@ class BlockCanvas(ctk.CTkFrame):
         # IV / XOR / Counter rectangle (hide for ECB)
         r2 = t2 = t2b = None
         if mode != "ECB" and blk.iv_or_xor_hex not in ("N/A", ""):
-            label_iv = {"CBC": "XOR Input", "CTR": "Counter", "GCM": "Counter"}.get(mode, "IV")
+            label_iv = {"CBC": "XOR Input", "CTR": "Counter", "GCM": "Counter"}.get(
+                mode, "IV"
+            )
             r2 = self._canvas.create_rectangle(
-                x0, y_iv, x0 + BLOCK_W, y_iv + BLOCK_H,
-                fill=COLOUR_IV, outline="#3A8F58", width=2,
+                x0,
+                y_iv,
+                x0 + BLOCK_W,
+                y_iv + BLOCK_H,
+                fill=COLOUR_IV,
+                outline="#3A8F58",
+                width=2,
             )
             t2 = self._canvas.create_text(
-                x0 + BLOCK_W // 2, y_iv + 10,
+                x0 + BLOCK_W // 2,
+                y_iv + 10,
                 text=label_iv,
                 font=("Courier New", 8),
                 fill="white",
             )
             t2b = self._canvas.create_text(
-                x0 + BLOCK_W // 2, y_iv + 28,
-                text=blk.iv_or_xor_hex[:16] + "…" if len(blk.iv_or_xor_hex) > 16 else blk.iv_or_xor_hex,
+                x0 + BLOCK_W // 2,
+                y_iv + 28,
+                text=_abbreviate(blk.iv_or_xor_hex),
                 font=("Courier New", 9, "bold"),
                 fill="white",
             )
 
         # Ciphertext rectangle
         r3 = self._canvas.create_rectangle(
-            x0, y_ct, x0 + BLOCK_W, y_ct + BLOCK_H,
-            fill=COLOUR_CT, outline="#B05A20", width=2,
+            x0,
+            y_ct,
+            x0 + BLOCK_W,
+            y_ct + BLOCK_H,
+            fill=COLOUR_CT,
+            outline="#B05A20",
+            width=2,
         )
         t3 = self._canvas.create_text(
-            x0 + BLOCK_W // 2, y_ct + 10,
+            x0 + BLOCK_W // 2,
+            y_ct + 10,
             text="Ciphertext",
             font=("Courier New", 8),
             fill="white",
         )
         t3b = self._canvas.create_text(
-            x0 + BLOCK_W // 2, y_ct + 28,
-            text=blk.ciphertext_hex[:16] + "…" if len(blk.ciphertext_hex) > 16 else blk.ciphertext_hex,
+            x0 + BLOCK_W // 2,
+            y_ct + 28,
+            text=_abbreviate(blk.ciphertext_hex),
             font=("Courier New", 9, "bold"),
             fill="white",
         )
 
         # Block index label
         idx_t = self._canvas.create_text(
-            x0 + BLOCK_W // 2, y_ct + BLOCK_H + 8,
+            x0 + BLOCK_W // 2,
+            y_ct + BLOCK_H + 8,
             text=f"Block {blk.index}",
             font=("Courier New", 8),
             fill="#AAAAAA",
@@ -206,11 +234,14 @@ class BlockCanvas(ctk.CTkFrame):
 
         # CBC chaining arrow (only for CBC, between blocks)
         if mode == "CBC" and blk.index > 0:
-            prev_x_mid = x0 - BLOCK_GAP // 2
             self._canvas.create_line(
-                x0 - BLOCK_GAP, y_ct + BLOCK_H // 2,
-                x0, y_ct + BLOCK_H // 2,
-                fill=ARROW_COLOR, arrow=tk.LAST, width=2,
+                x0 - BLOCK_GAP,
+                y_ct + BLOCK_H // 2,
+                x0,
+                y_ct + BLOCK_H // 2,
+                fill=ARROW_COLOR,
+                arrow=tk.LAST,
+                width=2,
             )
 
         # Gather all items for this block
@@ -219,9 +250,9 @@ class BlockCanvas(ctk.CTkFrame):
             item_ids += [r2, t2, t2b]
         self._block_ids[blk.index] = item_ids
 
-    def _block_at(self, x: int) -> Optional[int]:
+    def _block_at(self, x: int) -> int | None:
         """Return block index under canvas x coordinate, or None."""
-        for idx, blk in enumerate(self._blocks):
+        for idx in range(len(self._blocks)):
             x0 = BLOCK_GAP + idx * (BLOCK_W + BLOCK_GAP)
             if x0 <= x <= x0 + BLOCK_W:
                 return idx
@@ -251,10 +282,8 @@ class BlockCanvas(ctk.CTkFrame):
         # Reset previous selection
         if self._selected is not None and self._selected in self._block_ids:
             for item in self._block_ids[self._selected]:
-                try:
+                with contextlib.suppress(tk.TclError):
                     self._canvas.itemconfigure(item, outline="")
-                except tk.TclError:
-                    pass
 
         self._selected = idx
         blk = self._blocks[idx]
@@ -282,11 +311,10 @@ class AESTab(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
         # row 2 (comparison) is fixed height — no weight
 
-        self._key: Optional[bytes] = None
-        self._last_ciphertext: Optional[bytes] = None
-        self._last_iv: Optional[bytes] = None
-        self._last_nonce: Optional[bytes] = None
-        self._last_tag: Optional[bytes] = None
+        self._last_ciphertext: bytes | None = None
+        self._last_iv: bytes | None = None
+        self._last_nonce: bytes | None = None
+        self._last_tag: bytes | None = None
         self._last_mode: str = "ECB"
 
         self._build_controls()
@@ -304,7 +332,9 @@ class AESTab(ctk.CTkFrame):
             ctrl.grid_columnconfigure(i, weight=1 if i == 0 else 0)
 
         # Input text
-        ctk.CTkLabel(ctrl, text="Plaintext:").grid(row=0, column=0, sticky="w", padx=(8, 2))
+        ctk.CTkLabel(ctrl, text="Plaintext:").grid(
+            row=0, column=0, sticky="w", padx=(8, 2)
+        )
         self._input_var = tk.StringVar(value="Hello, AES World! Crypto is fun.")
         self._input_entry = ctk.CTkEntry(
             ctrl,
@@ -410,7 +440,7 @@ class AESTab(ctk.CTkFrame):
         # -------- Right: Image ECB demo --------
         right = ctk.CTkFrame(main)
         right.grid(row=0, column=1, sticky="nsew")
-        right.grid_rowconfigure(2, weight=1)   # image area expands
+        right.grid_rowconfigure(2, weight=1)  # image area expands
         right.grid_columnconfigure(0, weight=1)
 
         hdr = ctk.CTkFrame(right, fg_color="transparent")
@@ -442,7 +472,10 @@ class AESTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             right,
-            text="ECB leaks structure; CBC/CTR/GCM all produce noise — only ECB vs CBC shown here.",
+            text=(
+                "ECB leaks structure; CBC/CTR/GCM all produce noise — "
+                "only ECB vs CBC shown here."
+            ),
             font=("Courier New", 9),
             text_color="gray",
             justify="left",
@@ -497,7 +530,12 @@ class AESTab(ctk.CTkFrame):
                 f,
                 text=mode,
                 font=ctk.CTkFont(family="Courier New", size=12, weight="bold"),
-                text_color={"ECB": "#E07B39", "CBC": "#5B9BD5", "CTR": "#5BAD72", "GCM": "#9B59B6"}[mode],
+                text_color={
+                    "ECB": "#E07B39",
+                    "CBC": "#5B9BD5",
+                    "CTR": "#5BAD72",
+                    "GCM": "#9B59B6",
+                }[mode],
             ).grid(row=0, column=0, padx=6, pady=(6, 2), sticky="w")
 
             var = tk.StringVar(value="(no data)")
@@ -524,7 +562,9 @@ class AESTab(ctk.CTkFrame):
             except ValueError as exc:
                 raise ValueError("Key must be a valid hex string.") from exc
             if len(key) not in (16, 24, 32):
-                raise ValueError("Key must be 16, 24, or 32 bytes (32/48/64 hex chars).")
+                raise ValueError(
+                    "Key must be 16, 24, or 32 bytes (32/48/64 hex chars)."
+                )
             return key
         key = os.urandom(16)
         self._key_var.set(key.hex())
@@ -535,12 +575,13 @@ class AESTab(ctk.CTkFrame):
             key = self._resolve_key()
             plaintext = self._input_var.get().encode("utf-8")
             if not plaintext:
-                messagebox.showwarning("Input required", "Please enter some plaintext first.")
+                messagebox.showwarning(
+                    "Input required", "Please enter some plaintext first."
+                )
                 return
 
             mode = self._mode_var.get()
             self._last_mode = mode
-            self._key = key
 
             if mode == "ECB":
                 ct, blocks = encrypt_ecb(plaintext, key)
@@ -578,7 +619,8 @@ class AESTab(ctk.CTkFrame):
             if not raw:
                 messagebox.showwarning(
                     "Key required",
-                    "The key field is empty.\nEnter the hex key that was used to encrypt.",
+                    "The key field is empty.\n"
+                    "Enter the hex key that was used to encrypt.",
                 )
                 return
             try:
@@ -602,7 +644,9 @@ class AESTab(ctk.CTkFrame):
                 elif mode == "CTR":
                     pt = decrypt_ctr(self._last_ciphertext, key, self._last_nonce)
                 elif mode == "GCM":
-                    pt = decrypt_gcm(self._last_ciphertext, key, self._last_nonce, self._last_tag)
+                    pt = decrypt_gcm(
+                        self._last_ciphertext, key, self._last_nonce, self._last_tag
+                    )
                 else:
                     return
                 self._input_var.set(pt.decode("utf-8", errors="replace"))
@@ -615,7 +659,9 @@ class AESTab(ctk.CTkFrame):
                     if mode == "ECB":
                         raw = decrypt_ecb(self._last_ciphertext, key, strict=False)
                     else:  # CBC
-                        raw = decrypt_cbc(self._last_ciphertext, key, self._last_iv, strict=False)
+                        raw = decrypt_cbc(
+                            self._last_ciphertext, key, self._last_iv, strict=False
+                        )
                     self._input_var.set(raw.decode("utf-8", errors="replace"))
                     messagebox.showwarning(
                         "Wrong key",
@@ -628,12 +674,12 @@ class AESTab(ctk.CTkFrame):
 
             except Exception as exc:
                 # GCM raises InvalidTag (empty message) when the key is wrong.
-                # Identify it by class name so we don't need to import the exception type.
-                if type(exc).__name__ == "InvalidTag":
+                if isinstance(exc, InvalidTag):
                     messagebox.showerror(
                         "Authentication failed (GCM)",
                         "The authentication tag does not match.\n\n"
-                        "This means the key is wrong or the ciphertext was tampered with.\n"
+                        "This means the key is wrong or the ciphertext was "
+                        "tampered with.\n"
                         "GCM refuses to return any output at all — this is exactly\n"
                         "why authenticated encryption is safer than ECB or CBC.",
                     )
@@ -652,14 +698,7 @@ class AESTab(ctk.CTkFrame):
         }
         for mode, fn in ops.items():
             try:
-                result = fn()
-                if mode == "GCM":
-                    ct_data = result[0]
-                elif mode in ("CBC", "CTR"):
-                    ct_data = result[0]
-                else:
-                    ct_data = result[0]
-
+                ct_data = fn()[0]
                 ct_hex = ct_data.hex().upper()
                 display = ct_hex[:64] + ("…" if len(ct_hex) > 64 else "")
                 self._comp_vars[mode].set(display)
@@ -721,9 +760,10 @@ class AESTab(ctk.CTkFrame):
             # Resize to fit the display panel (keep aspect ratio)
             target_w = 150
             target_h = int(orig_img.height * target_w / orig_img.width)
-            orig_r = orig_img.resize((target_w, target_h), Image.LANCZOS)
-            ecb_r  = ecb_img.resize((target_w, target_h), Image.LANCZOS)
-            cbc_r  = cbc_img.resize((target_w, target_h), Image.LANCZOS)
+            lanczos = Image.Resampling.LANCZOS
+            orig_r = orig_img.resize((target_w, target_h), lanczos)
+            ecb_r = ecb_img.resize((target_w, target_h), lanczos)
+            cbc_r = cbc_img.resize((target_w, target_h), lanczos)
 
             self._tk_images = [
                 ImageTk.PhotoImage(orig_r),

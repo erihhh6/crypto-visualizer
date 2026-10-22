@@ -10,31 +10,29 @@ Layout:
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Optional
 
 import customtkinter as ctk
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from modules.key_exchange import (
     DHStep,
+    compare_dh_ecdh,
     run_dh_exchange,
     run_ecdh_exchange,
-    get_ecdh_curve_points,
-    compare_dh_ecdh,
 )
-
 
 # ---------------------------------------------------------------------------
 # Actor colours
 # ---------------------------------------------------------------------------
 ACTOR_COLOURS = {
-    "Alice":  "#5B9BD5",
-    "Bob":    "#E07B39",
-    "Both":   "#5BAD72",
+    "Alice": "#5B9BD5",
+    "Bob": "#E07B39",
+    "Both": "#5BAD72",
     "System": "#9B59B6",
 }
 DEFAULT_ACTOR_COLOUR = "#888888"
@@ -247,9 +245,8 @@ class KeyExchangeTab(ctk.CTkFrame):
         comp.grid_columnconfigure((1, 2, 3), weight=1)
 
         self._comp_frame = comp
-        self._comp_visible = True   # currently gridded
 
-        # Hide it immediately — button toggles visibility
+        # Hidden until the user asks for it — the button toggles visibility
         comp.grid_remove()
         self._comp_visible = False
 
@@ -301,7 +298,9 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._mode = "DH"
         self._render_steps()
         self._draw_dh_diagram()
-        self._status_var.set(f"DH exchange: {len(self._steps)} steps. Use Next/Prev to navigate.")
+        self._status_var.set(
+            f"DH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
+        )
 
     def _run_ecdh(self) -> None:
         self._status_var.set("Running ECDH exchange…")
@@ -311,7 +310,9 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._mode = "ECDH"
         self._render_steps()
         self._draw_ecdh_curve()
-        self._status_var.set(f"ECDH exchange: {len(self._steps)} steps. Use Next/Prev to navigate.")
+        self._status_var.set(
+            f"ECDH exchange: {len(self._steps)} steps. Use Next/Prev to navigate."
+        )
 
     def _show_comparison(self) -> None:
         if self._comp_visible:
@@ -332,7 +333,7 @@ class KeyExchangeTab(ctk.CTkFrame):
             w.destroy()
 
         for step in self._steps:
-            highlighted = (step.step_number - 1 == self._current_step)
+            highlighted = step.step_number - 1 == self._current_step
             card = StepCard(
                 self._step_scroll,
                 step,
@@ -346,7 +347,9 @@ class KeyExchangeTab(ctk.CTkFrame):
                 pady=4,
             )
 
-        self._prev_btn.configure(state="normal" if self._current_step > 0 else "disabled")
+        self._prev_btn.configure(
+            state="normal" if self._current_step > 0 else "disabled"
+        )
         self._next_btn.configure(
             state="normal" if self._current_step < len(self._steps) - 1 else "disabled"
         )
@@ -390,7 +393,13 @@ class KeyExchangeTab(ctk.CTkFrame):
         y_pos = np.sqrt(np.where(mask, y_sq, 0))
         y_neg = -y_pos
 
-        self._ax.plot(x[mask], y_pos[mask], color="#5B9BD5", linewidth=1.5, label="y² = x³ − x + 1")
+        self._ax.plot(
+            x[mask],
+            y_pos[mask],
+            color="#5B9BD5",
+            linewidth=1.5,
+            label="y² = x³ − x + 1",
+        )
         self._ax.plot(x[mask], y_neg[mask], color="#5B9BD5", linewidth=1.5)
 
         self._ax.set_xlim(-2.5, 3)
@@ -411,35 +420,70 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._ax.set_xlim(0, 10)
         self._ax.set_ylim(0, 6)
         self._ax.axis("off")
-        self._ax.set_title("DH Key Exchange — 2048-bit MODP (RFC 3526)", color="white", fontsize=9)
+        self._ax.set_title(
+            "DH Key Exchange — 2048-bit MODP (RFC 3526)", color="white", fontsize=9
+        )
 
         # Alice box
         self._ax.add_patch(plt.Rectangle((0.5, 2), 2, 2, color="#2E86AB", zorder=2))
-        self._ax.text(1.5, 3, "Alice", ha="center", va="center", color="white", fontsize=11, fontweight="bold")
+        self._ax.text(
+            1.5,
+            3,
+            "Alice",
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=11,
+            fontweight="bold",
+        )
 
         # Bob box
         self._ax.add_patch(plt.Rectangle((7.5, 2), 2, 2, color="#E07B39", zorder=2))
-        self._ax.text(8.5, 3, "Bob", ha="center", va="center", color="white", fontsize=11, fontweight="bold")
+        self._ax.text(
+            8.5,
+            3,
+            "Bob",
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=11,
+            fontweight="bold",
+        )
 
         # Arrows A→Bob
         self._ax.annotate(
-            "", xy=(7.5, 3.4), xytext=(2.5, 3.4),
+            "",
+            xy=(7.5, 3.4),
+            xytext=(2.5, 3.4),
             arrowprops=dict(arrowstyle="->", color="#5BAD72", lw=2),
         )
         self._ax.text(5, 3.6, "A = g^a mod p", ha="center", color="#5BAD72", fontsize=8)
 
         # Arrows B→Alice
         self._ax.annotate(
-            "", xy=(2.5, 2.6), xytext=(7.5, 2.6),
+            "",
+            xy=(2.5, 2.6),
+            xytext=(7.5, 2.6),
             arrowprops=dict(arrowstyle="->", color="#5B9BD5", lw=2),
         )
         self._ax.text(5, 2.3, "B = g^b mod p", ha="center", color="#5B9BD5", fontsize=8)
 
         # Shared secret labels
-        self._ax.text(1.5, 1.5, "shared = B^a mod p", ha="center", color="gray", fontsize=7)
-        self._ax.text(8.5, 1.5, "shared = A^b mod p", ha="center", color="gray", fontsize=7)
+        self._ax.text(
+            1.5, 1.5, "shared = B^a mod p", ha="center", color="gray", fontsize=7
+        )
+        self._ax.text(
+            8.5, 1.5, "shared = A^b mod p", ha="center", color="gray", fontsize=7
+        )
 
-        self._ax.text(5, 0.7, "Both arrive at the same shared secret!", ha="center", color="#5BAD72", fontsize=9)
+        self._ax.text(
+            5,
+            0.7,
+            "Both arrive at the same shared secret!",
+            ha="center",
+            color="#5BAD72",
+            fontsize=9,
+        )
 
         self._mpl_canvas.draw()
 
@@ -462,7 +506,13 @@ class KeyExchangeTab(ctk.CTkFrame):
         y_pos = np.sqrt(np.where(mask, y_sq, 0.0))
         y_neg = -y_pos
 
-        self._ax.plot(x[mask], y_pos[mask], color="#5B9BD5", linewidth=1.8, label="y² = x³ − x + 1")
+        self._ax.plot(
+            x[mask],
+            y_pos[mask],
+            color="#5B9BD5",
+            linewidth=1.8,
+            label="y² = x³ − x + 1",
+        )
         self._ax.plot(x[mask], y_neg[mask], color="#5B9BD5", linewidth=1.8)
 
         # Points computed so they exactly satisfy the curve equation
@@ -470,25 +520,29 @@ class KeyExchangeTab(ctk.CTkFrame):
         # QA at x = 1.3  →  y² = 2.197 − 1.3 + 1  = 1.897  →  y ≈ +1.378
         # QB at x = 2.0  →  y² = 8 − 2 + 1        = 7.000  →  y ≈ +2.646
         # S  at x = 0.5  →  y² = 0.125 − 0.5 + 1  = 0.625  →  y ≈ −0.791
-        G  = (-0.9, self._curve_y(-0.9, positive=True))
-        QA = (1.3,  self._curve_y(1.3,  positive=True))
-        QB = (2.0,  self._curve_y(2.0,  positive=True))
-        S  = (0.5,  self._curve_y(0.5,  positive=False))
+        G = (-0.9, self._curve_y(-0.9, positive=True))
+        QA = (1.3, self._curve_y(1.3, positive=True))
+        QB = (2.0, self._curve_y(2.0, positive=True))
+        S = (0.5, self._curve_y(0.5, positive=False))
 
         points_info = [
-            (G,  "G (generator)",  "#5BAD72"),
+            (G, "G (generator)", "#5BAD72"),
             (QA, "QA (Alice pub)", "#5B9BD5"),
-            (QB, "QB (Bob pub)",   "#E07B39"),
-            (S,  "S (shared)",     "#C0392B"),
+            (QB, "QB (Bob pub)", "#E07B39"),
+            (S, "S (shared)", "#C0392B"),
         ]
 
         # Annotation offsets tuned per-point to avoid overlap with the curve line
         offsets = [(-0.6, 0.3), (0.25, 0.35), (0.2, 0.3), (0.25, -0.35)]
 
         step_to_show = min(highlighted_step, len(points_info) - 1)
-        for i, ((pt, label, col), (dx, dy)) in enumerate(zip(points_info, offsets)):
+        for i, ((pt, label, col), (dx, dy)) in enumerate(
+            zip(points_info, offsets, strict=True)
+        ):
             if i <= step_to_show:
-                self._ax.scatter(*pt, color=col, s=90, zorder=6, edgecolors="white", linewidths=0.6)
+                self._ax.scatter(
+                    *pt, color=col, s=90, zorder=6, edgecolors="white", linewidths=0.6
+                )
                 self._ax.annotate(
                     label,
                     xy=pt,
@@ -503,11 +557,15 @@ class KeyExchangeTab(ctk.CTkFrame):
         self._ax.set_ylim(-3.2, 3.5)
         self._ax.axhline(0, color="gray", linewidth=0.4)
         self._ax.axvline(0, color="gray", linewidth=0.4)
-        self._ax.set_title("ECDH — simplified curve y² = x³ − x + 1", color="white", fontsize=9)
+        self._ax.set_title(
+            "ECDH — simplified curve y² = x³ − x + 1", color="white", fontsize=9
+        )
         self._ax.tick_params(colors="gray", labelsize=7)
         for spine in self._ax.spines.values():
             spine.set_edgecolor("#444")
-        self._ax.legend(fontsize=7, facecolor="#1E2533", labelcolor="gray", loc="upper left")
+        self._ax.legend(
+            fontsize=7, facecolor="#1E2533", labelcolor="gray", loc="upper left"
+        )
 
         self._mpl_canvas.draw()
 

@@ -12,22 +12,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
 
-from cryptography.hazmat.primitives.asymmetric.dh import (
-    DHParameterNumbers,
-    DHPublicNumbers,
-    DHPrivateNumbers,
-    generate_parameters,
-)
 from cryptography.hazmat.primitives.asymmetric.ec import (
     ECDH,
     SECP256R1,
     generate_private_key,
-    EllipticCurvePublicKey,
 )
-from cryptography.hazmat.backends import default_backend
-
 
 # ---------------------------------------------------------------------------
 # RFC 3526 Group 14 — 2048-bit MODP
@@ -55,28 +45,30 @@ def _short_hex(value: int, max_chars: int = 32) -> str:
     full = format(value, "X")
     if len(full) <= max_chars:
         return full
-    return full[:max_chars // 2] + "…" + full[-(max_chars // 2):]
+    return full[: max_chars // 2] + "…" + full[-(max_chars // 2) :]
 
 
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DHStep:
     """A single step in a DH/ECDH key-exchange protocol, used for animation."""
 
     step_number: int
-    actor: str          # "Alice", "Bob", "Both", "System"
-    description: str    # human-readable explanation
-    public_value: str   # short hex (max 32 chars visible)
+    actor: str  # "Alice", "Bob", "Both", "System"
+    description: str  # human-readable explanation
+    public_value: str  # short hex (max 32 chars visible)
     private_value: str  # masked if sensitive, e.g. "a = [PRIVATE]"
-    is_public: bool     # True → value transmitted over the wire
+    is_public: bool  # True → value transmitted over the wire
 
 
 # ---------------------------------------------------------------------------
 # Classical DH (RFC 3526 Group 14)
 # ---------------------------------------------------------------------------
+
 
 def run_dh_exchange() -> list[DHStep]:
     """
@@ -97,8 +89,8 @@ def run_dh_exchange() -> list[DHStep]:
     a = int.from_bytes(os.urandom(32), "big") % (p - 3) + 2
     b = int.from_bytes(os.urandom(32), "big") % (p - 3) + 2
 
-    A = pow(g, a, p)   # Alice's public value
-    B = pow(g, b, p)   # Bob's public value
+    A = pow(g, a, p)  # Alice's public value
+    B = pow(g, b, p)  # Bob's public value
 
     shared_alice = pow(B, a, p)
     shared_bob = pow(A, b, p)
@@ -192,6 +184,7 @@ def run_dh_exchange() -> list[DHStep]:
 # ECDH (SECP256R1 / P-256)
 # ---------------------------------------------------------------------------
 
+
 def run_ecdh_exchange() -> list[DHStep]:
     """
     Execute a full ECDH exchange on SECP256R1 and return annotated steps.
@@ -199,8 +192,8 @@ def run_ecdh_exchange() -> list[DHStep]:
     Steps mirror the classical DH steps but use elliptic curve operations.
     """
     curve = SECP256R1()
-    alice_private = generate_private_key(curve, default_backend())
-    bob_private = generate_private_key(curve, default_backend())
+    alice_private = generate_private_key(curve)
+    bob_private = generate_private_key(curve)
 
     alice_public = alice_private.public_key()
     bob_public = bob_private.public_key()
@@ -211,8 +204,8 @@ def run_ecdh_exchange() -> list[DHStep]:
     assert alice_shared == bob_shared, "ECDH shared secret mismatch!"
 
     # Extract public key coordinates for display
-    alice_pub_numbers = alice_public.public_numbers()  # type: ignore[attr-defined]
-    bob_pub_numbers = bob_public.public_numbers()      # type: ignore[attr-defined]
+    alice_pub_numbers = alice_public.public_numbers()
+    bob_pub_numbers = bob_public.public_numbers()
 
     alice_x = alice_pub_numbers.x
     alice_y = alice_pub_numbers.y
@@ -303,43 +296,6 @@ def run_ecdh_exchange() -> list[DHStep]:
     return steps
 
 
-def get_ecdh_curve_points() -> dict[str, Any]:
-    """
-    Run a fresh ECDH exchange and return key points for matplotlib plotting.
-
-    Because SECP256R1 operates on a 256-bit prime field that is impossible
-    to render meaningfully on a 2-D plot at real scale, we return the actual
-    coordinates alongside a flag indicating that a simplified small-field
-    visualisation should be used for the GUI plot.
-
-    Returns
-    -------
-    dict with keys:
-        "alice_pub"   : (x, y) integers — Alice's public key point
-        "bob_pub"     : (x, y) integers — Bob's public key point
-        "shared"      : bytes — raw shared secret (x-coordinate)
-        "curve_name"  : str
-    """
-    curve = SECP256R1()
-    alice_priv = generate_private_key(curve, default_backend())
-    bob_priv = generate_private_key(curve, default_backend())
-
-    alice_pub = alice_priv.public_key()
-    bob_pub = bob_priv.public_key()
-
-    alice_shared = alice_priv.exchange(ECDH(), bob_pub)
-
-    a_nums = alice_pub.public_numbers()  # type: ignore[attr-defined]
-    b_nums = bob_pub.public_numbers()    # type: ignore[attr-defined]
-
-    return {
-        "alice_pub": (a_nums.x, a_nums.y),
-        "bob_pub": (b_nums.x, b_nums.y),
-        "shared": alice_shared,
-        "curve_name": "SECP256R1",
-    }
-
-
 def compare_dh_ecdh() -> dict[str, dict[str, int]]:
     """
     Return equivalent key-size comparison between classical DH and ECDH.
@@ -353,40 +309,7 @@ def compare_dh_ecdh() -> dict[str, dict[str, int]]:
     | 256             | 15360           | 521         |
     """
     return {
-        "128bit": {"dh_bits": 3072,  "ecdh_bits": 256},
-        "192bit": {"dh_bits": 7680,  "ecdh_bits": 384},
+        "128bit": {"dh_bits": 3072, "ecdh_bits": 256},
+        "192bit": {"dh_bits": 7680, "ecdh_bits": 384},
         "256bit": {"dh_bits": 15360, "ecdh_bits": 521},
     }
-
-
-# ---------------------------------------------------------------------------
-# Self-test
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    print("=== Classical DH (RFC 3526 Group 14) ===")
-    dh_steps = run_dh_exchange()
-    for step in dh_steps:
-        print(f"  Step {step.step_number} [{step.actor}]: {step.description.split(chr(10))[0]}")
-        print(f"    Public value : {step.public_value}")
-        print(f"    Private value: {step.private_value}")
-
-    print("\n=== ECDH (SECP256R1) ===")
-    ecdh_steps = run_ecdh_exchange()
-    for step in ecdh_steps:
-        print(f"  Step {step.step_number} [{step.actor}]: {step.description.split(chr(10))[0]}")
-        print(f"    Public value : {step.public_value}")
-
-    print("\n=== Key Size Comparison ===")
-    comparison = compare_dh_ecdh()
-    for level, sizes in comparison.items():
-        print(f"  {level}: DH={sizes['dh_bits']} bits, ECDH={sizes['ecdh_bits']} bits")
-
-    print("\n=== ECDH Curve Points ===")
-    points = get_ecdh_curve_points()
-    print(f"  Curve      : {points['curve_name']}")
-    print(f"  Alice pub  : ({hex(points['alice_pub'][0])[:18]}..., ...)")
-    print(f"  Bob pub    : ({hex(points['bob_pub'][0])[:18]}..., ...)")
-    print(f"  Shared     : {points['shared'][:8].hex().upper()}...")
-
-    print("\nAll key exchange tests passed.")
