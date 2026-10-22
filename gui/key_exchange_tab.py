@@ -18,22 +18,60 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
 from modules.key_exchange import (
-    DHStep,
-    compare_dh_ecdh,
-    run_dh_exchange,
-    run_ecdh_exchange,
+    EQUIVALENT_KEY_SIZES,
+    Actor,
+    RawValue,
+    Step,
+    Value,
+    Visibility,
+    dh_steps,
+    ecdh_steps,
+    run_dh,
+    run_ecdh,
 )
 
 # ---------------------------------------------------------------------------
-# Actor colours
+# Colours
 # ---------------------------------------------------------------------------
 ACTOR_COLOURS = {
-    "Alice": "#5B9BD5",
-    "Bob": "#E07B39",
-    "Both": "#5BAD72",
-    "System": "#9B59B6",
+    Actor.ALICE: "#5B9BD5",
+    Actor.BOB: "#E07B39",
+    Actor.BOTH: "#5BAD72",
+    Actor.SYSTEM: "#9B59B6",
 }
-DEFAULT_ACTOR_COLOUR = "#888888"
+VALUE_COLOURS = {
+    Visibility.PUBLIC: "#27AE60",
+    Visibility.SHARED_SECRET: "#E74C3C",
+    Visibility.PRIVATE: "#AAAAAA",
+}
+
+
+def _shorten(hex_text: str, max_chars: int) -> str:
+    """Keep the first and last characters of a long hex string."""
+    if len(hex_text) <= max_chars:
+        return hex_text
+    half = max_chars // 2
+    return hex_text[:half] + "…" + hex_text[-half:]
+
+
+def _format(value: RawValue) -> str:
+    match value:
+        case str():
+            return value
+        case bytes():
+            return _shorten(value.hex().upper(), 32)
+        case int():
+            return _shorten(format(value, "X"), 32)
+        case (x, y):
+            return f"({_shorten(format(x, 'X'), 16)}, {_shorten(format(y, 'X'), 16)})"
+
+
+def _value_line(item: Value) -> str:
+    """One line of a step card; private keys are never shown, even in a demo."""
+    if item.visibility is Visibility.PRIVATE:
+        return f"   {item.symbol} = [private]"
+    icon = "🔓" if item.visibility is Visibility.PUBLIC else "🔒"
+    return f"{icon} {item.symbol} = {_format(item.value)}"
 
 
 class StepCard(ctk.CTkFrame):
@@ -42,7 +80,7 @@ class StepCard(ctk.CTkFrame):
     def __init__(
         self,
         parent: tk.Widget,
-        step: DHStep,
+        step: Step,
         highlighted: bool = False,
         **kwargs: object,
     ) -> None:
@@ -50,12 +88,12 @@ class StepCard(ctk.CTkFrame):
         super().__init__(parent, fg_color=bg, corner_radius=8, **kwargs)
         self.grid_columnconfigure(1, weight=1)
 
-        actor_col = ACTOR_COLOURS.get(step.actor, DEFAULT_ACTOR_COLOUR)
+        actor_col = ACTOR_COLOURS[step.actor]
 
         # Step number badge
         badge = ctk.CTkLabel(
             self,
-            text=f"{step.step_number}",
+            text=f"{step.number}",
             font=ctk.CTkFont(family="Courier New", size=16, weight="bold"),
             fg_color=actor_col,
             text_color="white",
@@ -83,24 +121,17 @@ class StepCard(ctk.CTkFrame):
             wraplength=300,
         ).grid(row=1, column=1, sticky="w", padx=4, pady=2)
 
-        # Public / private values
-        val_col = "#27AE60" if step.is_public else "#E74C3C"
-        public_icon = "🔓" if step.is_public else "🔒"
-        ctk.CTkLabel(
-            self,
-            text=f"{public_icon} {step.public_value}",
-            font=("Courier New", 9),
-            text_color=val_col,
-            justify="left",
-            wraplength=300,
-        ).grid(row=2, column=1, sticky="w", padx=4, pady=(0, 4))
-
-        ctk.CTkLabel(
-            self,
-            text=f"  {step.private_value}",
-            font=("Courier New", 9),
-            text_color="#AAA",
-        ).grid(row=3, column=1, sticky="w", padx=4, pady=(0, 8))
+        # The values this step produces, coloured by who may know them
+        for row, item in enumerate(step.values, start=2):
+            last = row == len(step.values) + 1
+            ctk.CTkLabel(
+                self,
+                text=_value_line(item),
+                font=("Courier New", 9),
+                text_color=VALUE_COLOURS[item.visibility],
+                justify="left",
+                wraplength=300,
+            ).grid(row=row, column=1, sticky="w", padx=4, pady=(0, 8 if last else 2))
 
 
 class KeyExchangeTab(ctk.CTkFrame):
@@ -111,7 +142,7 @@ class KeyExchangeTab(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        self._steps: list[DHStep] = []
+        self._steps: tuple[Step, ...] = ()
         self._current_step: int = 0
         self._mode: str = "DH"
 
@@ -260,23 +291,20 @@ class KeyExchangeTab(ctk.CTkFrame):
                 text_color="gray",
             ).grid(row=0, column=col, padx=12, pady=(6, 2), sticky="w")
 
-        data = compare_dh_ecdh()
-        row_map = {"128bit": 1, "192bit": 2, "256bit": 3}
-        for level, row in row_map.items():
-            vals = data[level]
-            ratio = vals["dh_bits"] // vals["ecdh_bits"]
-            ctk.CTkLabel(comp, text=level, font=("Courier New", 10)).grid(
-                row=row, column=0, padx=12, pady=2, sticky="w"
-            )
+        for row, level in enumerate(EQUIVALENT_KEY_SIZES, start=1):
+            ratio = level.ffdh_bits // level.ecdh_bits
+            ctk.CTkLabel(
+                comp, text=f"{level.security_bits}-bit", font=("Courier New", 10)
+            ).grid(row=row, column=0, padx=12, pady=2, sticky="w")
             ctk.CTkLabel(
                 comp,
-                text=f"{vals['dh_bits']:,} bits",
+                text=f"{level.ffdh_bits:,} bits",
                 font=("Courier New", 10),
                 text_color="#E07B39",
             ).grid(row=row, column=1, padx=12, pady=2, sticky="w")
             ctk.CTkLabel(
                 comp,
-                text=f"{vals['ecdh_bits']} bits",
+                text=f"{level.ecdh_bits} bits",
                 font=("Courier New", 10),
                 text_color="#5BAD72",
             ).grid(row=row, column=2, padx=12, pady=2, sticky="w")
@@ -294,7 +322,7 @@ class KeyExchangeTab(ctk.CTkFrame):
     def _run_dh(self) -> None:
         self._status_var.set("Running DH exchange…")
         self.update_idletasks()
-        self._steps = run_dh_exchange()
+        self._steps = dh_steps(run_dh())
         self._current_step = 0
         self._mode = "DH"
         self._render_steps()
@@ -306,7 +334,7 @@ class KeyExchangeTab(ctk.CTkFrame):
     def _run_ecdh(self) -> None:
         self._status_var.set("Running ECDH exchange…")
         self.update_idletasks()
-        self._steps = run_ecdh_exchange()
+        self._steps = ecdh_steps(run_ecdh())
         self._current_step = 0
         self._mode = "ECDH"
         self._render_steps()
@@ -334,14 +362,14 @@ class KeyExchangeTab(ctk.CTkFrame):
             w.destroy()
 
         for step in self._steps:
-            highlighted = step.step_number - 1 == self._current_step
+            highlighted = step.number - 1 == self._current_step
             card = StepCard(
                 self._step_scroll,
                 step,
                 highlighted=highlighted,
             )
             card.grid(
-                row=step.step_number - 1,
+                row=step.number - 1,
                 column=0,
                 sticky="ew",
                 padx=4,

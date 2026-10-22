@@ -1,29 +1,26 @@
 """
-Diffie-Hellman and ECDH key exchange with step-by-step metadata.
+Diffie-Hellman (finite field) and ECDH key agreement, told step by step.
 
-DH uses RFC 3526 Group 14 (2048-bit MODP group).
-ECDH uses NIST SECP256R1 (P-256) via PyCA cryptography.
+run_dh() and run_ecdh() perform a real exchange and return every value
+involved; dh_steps() and ecdh_steps() turn an exchange into the narrated steps
+the GUI animates. Values stay raw (ints, bytes, points): formatting them is the
+GUI's job.
 
-Both protocols expose each logical step as a DHStep dataclass so the
-GUI animator can walk through the exchange interactively.
+DH uses the 2048-bit MODP group 14 from RFC 3526; ECDH uses NIST P-256
+(secp256r1) through PyCA cryptography.
 """
 
 from __future__ import annotations
 
-import os
+import secrets
 from dataclasses import dataclass
+from enum import StrEnum
+from typing import TypeAlias
 
-from cryptography.hazmat.primitives.asymmetric.ec import (
-    ECDH,
-    SECP256R1,
-    generate_private_key,
-)
+from cryptography.hazmat.primitives.asymmetric import ec
 
-# ---------------------------------------------------------------------------
-# RFC 3526 Group 14 — 2048-bit MODP
-# ---------------------------------------------------------------------------
-
-_RFC3526_P = int(
+# RFC 3526 group 14: a 2048-bit safe prime p = 2q + 1, with generator 2.
+MODP2048_PRIME = int(
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
     "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
     "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
@@ -37,279 +34,304 @@ _RFC3526_P = int(
     "15728E5A8AACAA68FFFFFFFFFFFFFFFF",
     16,
 )
-_RFC3526_G = 2
+MODP2048_GENERATOR = 2
+
+# Private exponents are 256 random bits: at least twice the group's ~112-bit
+# security strength, as short-exponent DH requires, and far cheaper than a
+# full 2048-bit exponent.
+DH_EXPONENT_BITS = 256
+
+Point: TypeAlias = tuple[int, int]
+RawValue: TypeAlias = int | bytes | str | Point
 
 
-def _short_hex(value: int, max_chars: int = 32) -> str:
-    """Return a short uppercase hex representation of a large integer."""
-    full = format(value, "X")
-    if len(full) <= max_chars:
-        return full
-    return full[: max_chars // 2] + "…" + full[-(max_chars // 2) :]
+class Actor(StrEnum):
+    SYSTEM = "System"
+    ALICE = "Alice"
+    BOB = "Bob"
+    BOTH = "Both"
 
 
-# ---------------------------------------------------------------------------
-# Dataclass
-# ---------------------------------------------------------------------------
+class Visibility(StrEnum):
+    """Who may know a value."""
+
+    PUBLIC = "public"  # anyone, eavesdroppers included
+    PRIVATE = "private"  # its owner only; never sent and never shown
+    SHARED_SECRET = "shared secret"  # Alice and Bob only; never sent
 
 
-@dataclass
-class DHStep:
-    """A single step in a DH/ECDH key-exchange protocol, used for animation."""
-
-    step_number: int
-    actor: str  # "Alice", "Bob", "Both", "System"
-    description: str  # human-readable explanation
-    public_value: str  # short hex (max 32 chars visible)
-    private_value: str  # masked if sensitive, e.g. "a = [PRIVATE]"
-    is_public: bool  # True → value transmitted over the wire
+@dataclass(frozen=True)
+class Value:
+    symbol: str
+    value: RawValue
+    visibility: Visibility
 
 
-# ---------------------------------------------------------------------------
-# Classical DH (RFC 3526 Group 14)
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Step:
+    """One step of the story: who acts, what happens, which values appear."""
+
+    number: int
+    actor: Actor
+    description: str
+    values: tuple[Value, ...]
 
 
-def run_dh_exchange() -> list[DHStep]:
-    """
-    Execute a full 2048-bit DH key exchange and return annotated steps.
+@dataclass(frozen=True)
+class DHExchange:
+    p: int
+    g: int
+    alice_private: int  # a
+    bob_private: int  # b
+    alice_public: int  # A = g^a mod p
+    bob_public: int  # B = g^b mod p
+    shared_secret: int  # g^(ab) mod p
 
-    Steps:
-      1. System publishes p and g (public parameters)
-      2. Alice generates private key a, computes A = g^a mod p
-      3. Bob generates private key b, computes B = g^b mod p
-      4. Alice computes shared = B^a mod p
-      5. Bob computes shared = A^b mod p
-      6. Verification that shared_alice == shared_bob
-    """
-    p = _RFC3526_P
-    g = _RFC3526_G
 
-    # Generate private keys as random integers in [2, p-2]
-    a = int.from_bytes(os.urandom(32), "big") % (p - 3) + 2
-    b = int.from_bytes(os.urandom(32), "big") % (p - 3) + 2
+@dataclass(frozen=True)
+class ECDHExchange:
+    curve_name: str
+    alice_private: int  # dA
+    bob_private: int  # dB
+    alice_public: Point  # QA = dA × G
+    bob_public: Point  # QB = dB × G
+    shared_secret: bytes  # x-coordinate of dA × dB × G
 
-    A = pow(g, a, p)  # Alice's public value
-    B = pow(g, b, p)  # Bob's public value
 
-    shared_alice = pow(B, a, p)
-    shared_bob = pow(A, b, p)
+@dataclass(frozen=True)
+class SecurityLevel:
+    """Key sizes giving about the same security (NIST SP 800-57 Part 1, Table 2)."""
 
-    assert shared_alice == shared_bob, "DH shared secret mismatch!"
+    security_bits: int  # comparable symmetric key strength
+    ffdh_bits: int  # finite-field DH (and RSA) modulus size
+    ecdh_bits: int  # elliptic-curve key size
 
-    steps: list[DHStep] = [
-        DHStep(
-            step_number=1,
-            actor="System",
-            description=(
-                "Public parameters are established:\n"
-                "  p = 2048-bit prime (RFC 3526 Group 14)\n"
-                f"  g = {g}\n"
-                "These are known to everyone."
-            ),
-            public_value=_short_hex(g),
-            private_value="p = [2048-bit prime]",
-            is_public=True,
-        ),
-        DHStep(
-            step_number=2,
-            actor="Alice",
-            description=(
-                "Alice picks a secret random integer a,\n"
-                "then computes her public value:\n"
-                "  A = g^a mod p\n"
-                "She sends A to Bob."
-            ),
-            public_value=_short_hex(A),
-            private_value="a = [PRIVATE]",
-            is_public=True,
-        ),
-        DHStep(
-            step_number=3,
-            actor="Bob",
-            description=(
-                "Bob picks a secret random integer b,\n"
-                "then computes his public value:\n"
-                "  B = g^b mod p\n"
-                "He sends B to Alice."
-            ),
-            public_value=_short_hex(B),
-            private_value="b = [PRIVATE]",
-            is_public=True,
-        ),
-        DHStep(
-            step_number=4,
-            actor="Alice",
-            description=(
-                "Alice receives Bob's public value B.\n"
-                "She computes the shared secret:\n"
-                "  shared = B^a mod p\n"
-                "This is NOT sent over the wire."
-            ),
-            public_value=_short_hex(shared_alice),
-            private_value="a = [PRIVATE]",
-            is_public=False,
-        ),
-        DHStep(
-            step_number=5,
-            actor="Bob",
-            description=(
-                "Bob receives Alice's public value A.\n"
-                "He computes the shared secret:\n"
-                "  shared = A^b mod p\n"
-                "This is NOT sent over the wire."
-            ),
-            public_value=_short_hex(shared_bob),
-            private_value="b = [PRIVATE]",
-            is_public=False,
-        ),
-        DHStep(
-            step_number=6,
-            actor="Both",
-            description=(
-                "Both parties now hold the same shared secret\n"
-                "without ever transmitting their private keys.\n"
-                "shared_alice == shared_bob ✓\n"
-                "This shared secret can be used to derive symmetric keys."
-            ),
-            public_value=_short_hex(shared_alice),
-            private_value="Agreed!",
-            is_public=False,
-        ),
-    ]
-    return steps
+
+EQUIVALENT_KEY_SIZES = (
+    SecurityLevel(128, 3072, 256),
+    SecurityLevel(192, 7680, 384),
+    # SP 800-57 asks for 512+ bits here; the standard curve is P-521.
+    SecurityLevel(256, 15360, 521),
+)
+
+
+class KeyExchangeError(Exception):
+    """A received public value is unsafe, or the two sides disagree."""
 
 
 # ---------------------------------------------------------------------------
-# ECDH (SECP256R1 / P-256)
+# Classical (finite-field) Diffie-Hellman
 # ---------------------------------------------------------------------------
 
 
-def run_ecdh_exchange() -> list[DHStep]:
+def run_dh() -> DHExchange:
+    """Perform a full DH exchange in RFC 3526 group 14."""
+    p, g = MODP2048_PRIME, MODP2048_GENERATOR
+    a = _dh_private_exponent()
+    b = _dh_private_exponent()
+    alice_public = pow(g, a, p)
+    bob_public = pow(g, b, p)
+
+    # Each side checks the value it receives before raising it to its secret.
+    validate_dh_public_value(bob_public, p)
+    validate_dh_public_value(alice_public, p)
+    alice_shared = pow(bob_public, a, p)
+    bob_shared = pow(alice_public, b, p)
+    if alice_shared != bob_shared:
+        raise KeyExchangeError("Alice and Bob computed different DH secrets")
+
+    return DHExchange(p, g, a, b, alice_public, bob_public, alice_shared)
+
+
+def validate_dh_public_value(y: int, p: int = MODP2048_PRIME) -> None:
     """
-    Execute a full ECDH exchange on SECP256R1 and return annotated steps.
+    Reject a received DH public value that would expose the shared secret.
 
-    Steps mirror the classical DH steps but use elliptic curve operations.
+    0, 1 and p - 1 make the secret predictable, so y must lie in [2, p - 2].
+    For a safe prime p = 2q + 1 it must also lie in the subgroup of prime
+    order q (y^q = 1 mod p); otherwise a malicious peer could confine the
+    secret to a tiny subgroup and guess it.
     """
-    curve = SECP256R1()
-    alice_private = generate_private_key(curve)
-    bob_private = generate_private_key(curve)
+    if not 2 <= y <= p - 2:
+        raise KeyExchangeError("DH public value is outside the range [2, p - 2]")
+    if pow(y, (p - 1) // 2, p) != 1:
+        raise KeyExchangeError("DH public value is not in the prime-order subgroup")
 
-    alice_public = alice_private.public_key()
-    bob_public = bob_private.public_key()
 
-    alice_shared = alice_private.exchange(ECDH(), bob_public)
-    bob_shared = bob_private.exchange(ECDH(), alice_public)
-
-    assert alice_shared == bob_shared, "ECDH shared secret mismatch!"
-
-    # Extract public key coordinates for display
-    alice_pub_numbers = alice_public.public_numbers()
-    bob_pub_numbers = bob_public.public_numbers()
-
-    alice_x = alice_pub_numbers.x
-    alice_y = alice_pub_numbers.y
-    bob_x = bob_pub_numbers.x
-    bob_y = bob_pub_numbers.y
-
-    steps: list[DHStep] = [
-        DHStep(
-            step_number=1,
-            actor="System",
-            description=(
-                "Public parameters are established:\n"
-                "  Curve: SECP256R1 (P-256, NIST)\n"
-                "  Generator point G and curve equation\n"
-                "    y² = x³ − 3x + b  (mod p)\n"
-                "All parameters are standardised and public."
-            ),
-            public_value="SECP256R1",
-            private_value="Curve params = [public]",
-            is_public=True,
+def dh_steps(exchange: DHExchange) -> tuple[Step, ...]:
+    """The DH exchange as six narrated steps."""
+    public, private, shared = (
+        Visibility.PUBLIC,
+        Visibility.PRIVATE,
+        Visibility.SHARED_SECRET,
+    )
+    secret = Value("s", exchange.shared_secret, shared)
+    return (
+        Step(
+            1,
+            Actor.SYSTEM,
+            "Public parameters are agreed in advance:\n"
+            "  p = a 2048-bit prime (RFC 3526 group 14)\n"
+            "  g = 2, the generator\n"
+            "Everyone knows them, eavesdroppers included.",
+            (Value("p", exchange.p, public), Value("g", exchange.g, public)),
         ),
-        DHStep(
-            step_number=2,
-            actor="Alice",
-            description=(
-                "Alice generates a random private scalar dA,\n"
-                "then computes her public key point:\n"
-                "  QA = dA × G  (point multiplication)\n"
-                "She sends QA (x, y) to Bob."
+        Step(
+            2,
+            Actor.ALICE,
+            "Alice picks a secret random exponent a,\n"
+            "then computes her public value:\n"
+            "  A = g^a mod p\n"
+            "She sends A to Bob.",
+            (
+                Value("a", exchange.alice_private, private),
+                Value("A", exchange.alice_public, public),
             ),
-            public_value=f"({_short_hex(alice_x, 16)}, {_short_hex(alice_y, 16)})",
-            private_value="dA = [PRIVATE]",
-            is_public=True,
         ),
-        DHStep(
-            step_number=3,
-            actor="Bob",
-            description=(
-                "Bob generates a random private scalar dB,\n"
-                "then computes his public key point:\n"
-                "  QB = dB × G  (point multiplication)\n"
-                "He sends QB (x, y) to Alice."
+        Step(
+            3,
+            Actor.BOB,
+            "Bob picks a secret random exponent b,\n"
+            "then computes his public value:\n"
+            "  B = g^b mod p\n"
+            "He sends B to Alice.",
+            (
+                Value("b", exchange.bob_private, private),
+                Value("B", exchange.bob_public, public),
             ),
-            public_value=f"({_short_hex(bob_x, 16)}, {_short_hex(bob_y, 16)})",
-            private_value="dB = [PRIVATE]",
-            is_public=True,
         ),
-        DHStep(
-            step_number=4,
-            actor="Alice",
-            description=(
-                "Alice receives Bob's public point QB.\n"
-                "She computes the shared point:\n"
-                "  S = dA × QB = dA × dB × G\n"
-                "The x-coordinate of S is the shared secret."
-            ),
-            public_value=alice_shared[:16].hex().upper() + "…",
-            private_value="dA = [PRIVATE]",
-            is_public=False,
+        Step(
+            4,
+            Actor.ALICE,
+            "Alice receives Bob's public value B.\n"
+            "She computes the shared secret:\n"
+            "  s = B^a mod p\n"
+            "It is never sent over the wire.",
+            (secret,),
         ),
-        DHStep(
-            step_number=5,
-            actor="Bob",
-            description=(
-                "Bob receives Alice's public point QA.\n"
-                "He computes the shared point:\n"
-                "  S = dB × QA = dB × dA × G\n"
-                "The x-coordinate of S is the shared secret."
-            ),
-            public_value=bob_shared[:16].hex().upper() + "…",
-            private_value="dB = [PRIVATE]",
-            is_public=False,
+        Step(
+            5,
+            Actor.BOB,
+            "Bob receives Alice's public value A.\n"
+            "He computes the shared secret:\n"
+            "  s = A^b mod p\n"
+            "It is never sent over the wire.",
+            (secret,),
         ),
-        DHStep(
-            step_number=6,
-            actor="Both",
-            description=(
-                "Both parties hold the same shared secret (x-coord of S).\n"
-                "No private scalars were ever transmitted.\n"
-                "shared_alice == shared_bob ✓\n"
-                "256-bit ECDH ≈ 3072-bit classical DH in security."
-            ),
-            public_value=alice_shared[:16].hex().upper() + "…",
-            private_value="Agreed!",
-            is_public=False,
+        Step(
+            6,
+            Actor.BOTH,
+            "Both now hold the same s = g^(ab) mod p\n"
+            "without ever sending a or b.\n"
+            "A key derivation function turns s into symmetric keys.",
+            (secret,),
         ),
-    ]
-    return steps
+    )
 
 
-def compare_dh_ecdh() -> dict[str, dict[str, int]]:
-    """
-    Return equivalent key-size comparison between classical DH and ECDH.
+def _dh_private_exponent() -> int:
+    """A random exponent in [2, 2^DH_EXPONENT_BITS)."""
+    return 2 + secrets.randbelow(2**DH_EXPONENT_BITS - 2)
 
-    Security levels and their approximate equivalent key sizes:
 
-    | Security (bits) | DH / RSA (bits) | ECDH (bits) |
-    |-----------------|-----------------|-------------|
-    | 128             | 3072            | 256         |
-    | 192             | 7680            | 384         |
-    | 256             | 15360           | 521         |
-    """
-    return {
-        "128bit": {"dh_bits": 3072, "ecdh_bits": 256},
-        "192bit": {"dh_bits": 7680, "ecdh_bits": 384},
-        "256bit": {"dh_bits": 15360, "ecdh_bits": 521},
-    }
+# ---------------------------------------------------------------------------
+# ECDH (NIST P-256)
+# ---------------------------------------------------------------------------
+
+
+def run_ecdh() -> ECDHExchange:
+    """Perform a full ECDH exchange on P-256."""
+    curve = ec.SECP256R1()
+    alice = ec.generate_private_key(curve)
+    bob = ec.generate_private_key(curve)
+
+    alice_shared = alice.exchange(ec.ECDH(), bob.public_key())
+    bob_shared = bob.exchange(ec.ECDH(), alice.public_key())
+    if alice_shared != bob_shared:
+        raise KeyExchangeError("Alice and Bob computed different ECDH secrets")
+
+    return ECDHExchange(
+        curve_name=curve.name,
+        alice_private=alice.private_numbers().private_value,
+        bob_private=bob.private_numbers().private_value,
+        alice_public=_point(alice.public_key()),
+        bob_public=_point(bob.public_key()),
+        shared_secret=alice_shared,
+    )
+
+
+def ecdh_steps(exchange: ECDHExchange) -> tuple[Step, ...]:
+    """The ECDH exchange as six narrated steps."""
+    public, private, shared = (
+        Visibility.PUBLIC,
+        Visibility.PRIVATE,
+        Visibility.SHARED_SECRET,
+    )
+    secret = Value("S.x", exchange.shared_secret, shared)
+    return (
+        Step(
+            1,
+            Actor.SYSTEM,
+            "Public parameters are agreed in advance:\n"
+            "  Curve: NIST P-256 (secp256r1)\n"
+            "    y² = x³ − 3x + b  (mod p)\n"
+            "  and its generator point G.\n"
+            "They are standardised and public.",
+            (Value("curve", exchange.curve_name, public),),
+        ),
+        Step(
+            2,
+            Actor.ALICE,
+            "Alice picks a secret random scalar dA,\n"
+            "then computes her public key point:\n"
+            "  QA = dA × G  (point multiplication)\n"
+            "She sends QA (x, y) to Bob.",
+            (
+                Value("dA", exchange.alice_private, private),
+                Value("QA", exchange.alice_public, public),
+            ),
+        ),
+        Step(
+            3,
+            Actor.BOB,
+            "Bob picks a secret random scalar dB,\n"
+            "then computes his public key point:\n"
+            "  QB = dB × G  (point multiplication)\n"
+            "He sends QB (x, y) to Alice.",
+            (
+                Value("dB", exchange.bob_private, private),
+                Value("QB", exchange.bob_public, public),
+            ),
+        ),
+        Step(
+            4,
+            Actor.ALICE,
+            "Alice receives Bob's public point QB.\n"
+            "She computes the shared point:\n"
+            "  S = dA × QB = dA × dB × G\n"
+            "The x-coordinate of S is the shared secret.",
+            (secret,),
+        ),
+        Step(
+            5,
+            Actor.BOB,
+            "Bob receives Alice's public point QA.\n"
+            "He computes the shared point:\n"
+            "  S = dB × QA = dB × dA × G\n"
+            "The x-coordinate of S is the shared secret.",
+            (secret,),
+        ),
+        Step(
+            6,
+            Actor.BOTH,
+            "Both hold the same S.x without ever\n"
+            "sending dA or dB.\n"
+            "256-bit ECDH ≈ 3072-bit classical DH in security.",
+            (secret,),
+        ),
+    )
+
+
+def _point(public_key: ec.EllipticCurvePublicKey) -> Point:
+    numbers = public_key.public_numbers()
+    return numbers.x, numbers.y
