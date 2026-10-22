@@ -8,8 +8,14 @@ __pycache__/
 venv/
 env/
 
-# Pytest cache
+# Test, coverage, lint and type-check caches
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.ruff_cache/
+.mypy_cache/
 
 # OS files
 .DS_Store

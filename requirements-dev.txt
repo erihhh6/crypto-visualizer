@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Exact pins: lint and type-check results must be identical locally and in CI.
+pytest==9.0.2
+pytest-cov==7.1.0
+ruff==0.17.1
+mypy==2.4.0

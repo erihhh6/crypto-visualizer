@@ -1,0 +1,56 @@
+# Tool configuration only. Dependencies live in requirements*.txt until the code
+# moves into a single importable package: installing the current flat layout would
+# put generic top-level packages named `gui` and `modules` into site-packages.
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    # Provides the `pytester` fixture used to test our own test helpers.
+    "-p", "pytester",
+]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["modules", "gui"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import sorting
+    "B",       # bugbear: likely bugs and design problems
+    "UP",      # pyupgrade: modern syntax for the target version
+    "SIM",     # simplifiable code
+    "PT",      # pytest style
+    "RUF",     # ruff-specific checks
+]
+# Displayed maths deliberately uses typographic symbols (dA × G, x³ − x + 1).
+allowed-confusables = ["×", "−", "–"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gui", "modules", "tests"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["main.py", "modules", "gui", "tests"]
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# CustomTkinter ships neither inline types nor stubs.
+module = ["customtkinter", "customtkinter.*"]
+ignore_missing_imports = true

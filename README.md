@@ -36,6 +36,17 @@ Requires Python 3.10+.
 
 ---
 
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tool configuration (pytest, coverage, ruff, mypy) lives in `pyproject.toml`.
+
+---
+
 ## Concepts demonstrated
 
 | Concept | What the app shows | Reference |
