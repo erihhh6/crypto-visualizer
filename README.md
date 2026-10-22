@@ -40,10 +40,15 @@ Requires Python 3.10+.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest
+
+python -m pytest --cov   # tests + coverage (any warning fails the run)
+python -m ruff check .   # lint
+python -m ruff format .  # format
+python -m mypy           # strict type check
 ```
 
-Tool configuration (pytest, coverage, ruff, mypy) lives in `pyproject.toml`.
+CI runs the same checks on every push and pull request, with tests on
+Python 3.10–3.15. Tool configuration lives in `pyproject.toml`.
 
 ---
 

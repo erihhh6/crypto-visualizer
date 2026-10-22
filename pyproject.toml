@@ -13,6 +13,8 @@ addopts = [
     "-p", "pytester",
 ]
 xfail_strict = true
+# A new deprecation in a dependency should fail CI, not scroll by unnoticed.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
@@ -54,3 +56,10 @@ enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 # CustomTkinter ships neither inline types nor stubs.
 module = ["customtkinter", "customtkinter.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Known debt: gui/ does not type-check yet (Optional state passed into crypto
+# calls that need bytes, subclasses of untyped CustomTkinter widgets, untyped
+# matplotlib Tk-backend calls). Delete this override once it does.
+module = ["gui.*"]
+ignore_errors = true
