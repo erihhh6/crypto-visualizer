@@ -28,6 +28,24 @@ app.after(300, app.destroy)
 app.mainloop()
 """
 
+_SWITCH_TABS = """
+import json
+from gui.main_window import MainWindow
+from tests.gui.helpers import find_button, pump
+
+app = MainWindow()
+pump(app)
+shown = []
+for name in ("Tamper Lab", "Key Exchange", "AES Modes"):
+    find_button(app, name).invoke()  # a segment of the tab selector
+    pump(app)
+    tabs = {"AES Modes": app.aes_tab, "Key Exchange": app.key_tab,
+            "Tamper Lab": app.tamper_tab}
+    shown.append([n for n, tab in tabs.items() if tab.winfo_ismapped()])
+print(json.dumps(shown))
+app.destroy()
+"""
+
 _CLOSE_TIMEOUT_S = 10
 _HUNG_EXIT_CODE = 3
 
@@ -83,6 +101,14 @@ def test_unexpected_errors_are_shown_and_logged() -> None:
     assert "Traceback (most recent call last)" in result.stderr
     assert "in broken_handler" in result.stderr
     assert "RuntimeError: boom" in result.stderr
+
+
+def test_the_tab_selector_shows_one_tab_at_a_time() -> None:
+    result = run_app_script(_SWITCH_TABS)
+
+    require(result.returncode == 0, f"app crashed:\n{result.stderr}")
+    shown = json.loads(result.stdout.strip().splitlines()[-1])
+    assert shown == [["Tamper Lab"], ["Key Exchange"], ["AES Modes"]]
 
 
 def test_closing_the_window_ends_the_process() -> None:

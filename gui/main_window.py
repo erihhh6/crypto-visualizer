@@ -19,6 +19,7 @@ from PIL import Image, ImageTk
 
 from gui.aes_tab import AESTab
 from gui.key_exchange_tab import KeyExchangeTab
+from gui.tamper_tab import TamperTab
 
 _ICON_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "assets", "icon.ico"
@@ -103,15 +104,16 @@ class MainWindow(ctk.CTk):
         box.grid_rowconfigure(1, weight=1)
 
         # Tab selector — lives INSIDE the gray box at the top
+        # Tab selector — lives INSIDE the gray box at the top
+        names = ("AES Modes", "Key Exchange", "Tamper Lab")
         self._tab_selector = ctk.CTkSegmentedButton(
             box,
-            values=["AES Modes", "Key Exchange"],
+            values=list(names),
             command=self._switch_tab,
             font=ctk.CTkFont(size=12),
-            width=260,
+            width=390,
         )
         self._tab_selector.grid(row=0, column=0, padx=16, pady=(12, 8), sticky="w")
-        self._tab_selector.set("AES Modes")
 
         # Content area — also inside the same gray box
         content = ctk.CTkFrame(box, fg_color="transparent")
@@ -120,16 +122,20 @@ class MainWindow(ctk.CTk):
         content.grid_rowconfigure(0, weight=1)
 
         self.aes_tab = AESTab(content)
-        self.aes_tab.grid(row=0, column=0, sticky="nsew")
-
         self.key_tab = KeyExchangeTab(content)
-        self.key_tab.grid(row=0, column=0, sticky="nsew")
-        self.key_tab.grid_remove()  # hidden until the user selects it
+        self.tamper_tab = TamperTab(content)
+        tabs = (self.aes_tab, self.key_tab, self.tamper_tab)
+        self._tabs: dict[str, ctk.CTkFrame] = dict(zip(names, tabs, strict=True))
+        for tab in tabs:
+            tab.grid(row=0, column=0, sticky="nsew")
+
+        self._tab_selector.set(names[0])
+        self._switch_tab(names[0])
 
     def _switch_tab(self, value: str) -> None:
-        if value == "AES Modes":
-            self.key_tab.grid_remove()
-            self.aes_tab.grid()
-        else:
-            self.aes_tab.grid_remove()
-            self.key_tab.grid()
+        """Show the tab named *value* and hide the others."""
+        for name, tab in self._tabs.items():
+            if name == value:
+                tab.grid()
+            else:
+                tab.grid_remove()
