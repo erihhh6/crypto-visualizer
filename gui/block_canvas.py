@@ -191,11 +191,19 @@ class BlockCanvas(ctk.CTkFrame):
         self._surface = tk.Canvas(self, highlightthickness=0)
         self._surface.grid(row=0, column=0, sticky="nsew")
 
+        # Many blocks make the diagram wide, and the four rows of CTR and GCM
+        # are taller than the canvas gets in a small window.
         self._hscroll = ctk.CTkScrollbar(
             self, orientation="horizontal", command=self._surface.xview
         )
         self._hscroll.grid(row=1, column=0, sticky="ew")
-        self._surface.configure(xscrollcommand=self._hscroll.set)
+        self._vscroll = ctk.CTkScrollbar(
+            self, orientation="vertical", command=self._surface.yview
+        )
+        self._vscroll.grid(row=0, column=1, sticky="ns")
+        self._surface.configure(
+            xscrollcommand=self._hscroll.set, yscrollcommand=self._vscroll.set
+        )
 
         self._tooltip = Tooltip(self._surface)
         self._on_select = on_select
@@ -215,10 +223,11 @@ class BlockCanvas(ctk.CTkFrame):
         self._surface.configure(background=resolve(SURFACE))
         if self._result is None:
             return
-        scrolled = self._surface.xview()[0]
+        left, top = self._surface.xview()[0], self._surface.yview()[0]
         selected = self._selected.title if self._selected else None
         self.draw(self._result)
-        self._surface.xview_moveto(scrolled)
+        self._surface.xview_moveto(left)
+        self._surface.yview_moveto(top)
         for item in self._items:
             if item.title == selected:
                 self._select(item)
@@ -227,6 +236,7 @@ class BlockCanvas(ctk.CTkFrame):
         self._result = result
         self._surface.delete("all")
         self._surface.xview_moveto(0)
+        self._surface.yview_moveto(0)
         self._items = []
         self._normal_borders = {}
         self._selected = None

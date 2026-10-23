@@ -63,12 +63,21 @@ def _format(value: RawValue) -> str:
             return f"({_shorten(format(x, 'X'), 16)}, {_shorten(format(y, 'X'), 16)})"
 
 
+# Who may know each value, in words. Lock emoji did this once, but without an
+# emoji font (common on Linux) both drew as the same empty box, and only green
+# versus red, which many colour-blind readers cannot tell apart, was left.
+_WHO_KNOWS = {
+    Visibility.PUBLIC: "public",
+    Visibility.PRIVATE: "private",
+    Visibility.SHARED_SECRET: "secret",
+}
+
+
 def _value_line(item: Value) -> str:
     """One line of a step card; private keys are never shown, even in a demo."""
-    if item.visibility is Visibility.PRIVATE:
-        return f"   {item.symbol} = [private]"
-    icon = "🔓" if item.visibility is Visibility.PUBLIC else "🔒"
-    return f"{icon} {item.symbol} = {_format(item.value)}"
+    private = item.visibility is Visibility.PRIVATE
+    value = "[hidden]" if private else _format(item.value)
+    return f"{_WHO_KNOWS[item.visibility]:<7} {item.symbol} = {value}"
 
 
 AUTOPLAY_MS = 1500  # time on each step when playing
@@ -386,9 +395,9 @@ class KeyExchangeTab(ctk.CTkFrame):
         last = len(self._cards) - 1
         self._prev_btn.configure(state="normal" if index > 0 else "disabled")
         self._next_btn.configure(state="normal" if index < last else "disabled")
+        # Short enough to fit beside the buttons in the smallest window.
         self._status_var.set(
-            f"{self._mode} exchange: step {index + 1} of {last + 1}. "
-            "Next/Prev or ←/→, or Play."
+            f"{self._mode}: step {index + 1} of {last + 1} (←/→ keys work too)"
         )
         self._scroll_to_current()
         self._update_plot_for_step()

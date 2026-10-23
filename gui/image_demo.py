@@ -21,7 +21,9 @@ from modules.aes_modes import encrypt_pixels_cbc, encrypt_pixels_ecb
 # Larger images are shrunk before they are encrypted: the pattern shows just
 # as well, and loading even a 24-megapixel photo then stays well under 0.2 s.
 MAX_ENCRYPTED_SIDE = 512
-SHOWN_SIDE = 150  # each view fits in a square this size (before HiDPI scaling)
+# Each view fits in a square this size (before HiDPI scaling), or a smaller one
+# if the window leaves less room.
+SHOWN_SIDE = 150
 
 _SAMPLE = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "assets", "sample.bmp"
@@ -123,6 +125,8 @@ class ImageDemo(ctk.CTkFrame):
         img_frame.grid_columnconfigure((0, 1, 2), weight=1)
         img_frame.grid_rowconfigure(0, weight=1)
 
+        self._views: EcbViews | None = None
+        self._shown_size: tuple[int, int] | None = None
         self._img_labels: list[ctk.CTkLabel] = []
         captions = [
             "Original",
@@ -132,6 +136,7 @@ class ImageDemo(ctk.CTkFrame):
         for col, cap in enumerate(captions):
             lbl = ctk.CTkLabel(img_frame, text="", image=None)
             lbl.grid(row=0, column=col, padx=4, pady=4, sticky="nsew")
+            lbl.bind("<Configure>", lambda _event: self._fit_views(), add="+")
             self._img_labels.append(lbl)
             ctk.CTkLabel(
                 img_frame,
@@ -166,12 +171,8 @@ class ImageDemo(ctk.CTkFrame):
             messagebox.showerror("Cannot open image", f"{path}\n\n{exc}")
             return
 
-        shown = fit_within(views.original.size, SHOWN_SIDE)
-        for label, view in zip(
-            self._img_labels, (views.original, views.ecb, views.cbc), strict=True
-        ):
-            # CTkImage, unlike a Tk PhotoImage, scales with the display's DPI.
-            label.configure(image=ctk.CTkImage(light_image=view, size=shown))
+        self._views, self._shown_size = views, None
+        self._fit_views()
 
         width, height = views.original.size
         note = f"{width}×{height} pixels encrypted"
@@ -179,3 +180,23 @@ class ImageDemo(ctk.CTkFrame):
             source_width, source_height = views.source_size
             note += f" (shrunk from {source_width}×{source_height})"
         self._size_note.configure(text=note)
+
+    def _fit_views(self) -> None:
+        """Show the views as large as SHOWN_SIDE, or as their labels have room for."""
+        if self._views is None:
+            return
+        room = min(
+            min(lbl.winfo_width(), lbl.winfo_height()) for lbl in self._img_labels
+        )
+        side = SHOWN_SIDE
+        if room > 1:  # laid out; a small window may leave less room than that
+            scaling = ctk.ScalingTracker.get_widget_scaling(self)
+            side = max(1, min(side, int(room / scaling)))
+        size = fit_within(self._views.original.size, side)
+        if size == self._shown_size:
+            return  # a resize, but not one that changes the views
+        self._shown_size = size
+        views = (self._views.original, self._views.ecb, self._views.cbc)
+        for label, view in zip(self._img_labels, views, strict=True):
+            # CTkImage, unlike a Tk PhotoImage, scales with the display's DPI.
+            label.configure(image=ctk.CTkImage(light_image=view, size=size))

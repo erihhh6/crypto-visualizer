@@ -148,6 +148,91 @@ def click_block(canvas: tk.Canvas, index: int) -> None:
     canvas.event_generate("<Button-1>", x=x, y=y)
 
 
+_CONTROLS = (
+    ctk.CTkButton,
+    ctk.CTkEntry,
+    ctk.CTkLabel,
+    ctk.CTkOptionMenu,
+    ctk.CTkSegmentedButton,
+)
+
+
+def _ancestors(widget: tk.Misc) -> Iterator[tk.Misc]:
+    while widget.master is not None:
+        widget = widget.master
+        yield widget
+
+
+def _scrolls_into_view(widget: tk.Misc) -> bool:
+    """Inside a scrollable frame, which may hold more than fits the window."""
+    return any(isinstance(w, ctk.CTkScrollableFrame) for w in _ancestors(widget))
+
+
+def _control_text(control: tk.Misc) -> str:
+    """The text a CustomTkinter control draws in its inner Tk label, if any."""
+    labels = [w for w in descendants(control) if isinstance(w, tk.Label)]
+    return label_text(labels[0]) if labels else ""
+
+
+def clipped_controls(window: tk.Misc) -> list[str]:
+    """
+    Describe every control on show in *window* that it cuts off or squeezes.
+
+    A control is on show when its geometry manager would display it: then it
+    must be mapped (pack unmaps what has no room left), get at least the size
+    it asks for and, unless a scrollable frame can bring it into view, lie
+    inside the window.
+    """
+    right = window.winfo_rootx() + window.winfo_width()
+    bottom = window.winfo_rooty() + window.winfo_height()
+    clipped = []
+    for widget in descendants(window):
+        if not isinstance(widget, _CONTROLS):
+            continue
+        if not (widget.winfo_manager() and widget.master.winfo_ismapped()):
+            continue  # hidden on purpose, like the tabs not shown
+        width, height = widget.winfo_width(), widget.winfo_height()
+        problem = ""
+        if not widget.winfo_ismapped():
+            problem = "no room at all"
+        elif width < widget.winfo_reqwidth() or height < widget.winfo_reqheight():
+            problem = (
+                f"squeezed to {width}x{height} "
+                f"(asks {widget.winfo_reqwidth()}x{widget.winfo_reqheight()})"
+            )
+        elif not _scrolls_into_view(widget) and (
+            widget.winfo_rootx() + width > right
+            or widget.winfo_rooty() + height > bottom
+        ):
+            problem = "cut off by the window edge"
+        if problem:
+            text = _control_text(widget)
+            clipped.append(f"{type(widget).__name__} {text!r}: {problem}")
+    return clipped
+
+
+def shown_texts(window: tk.Misc) -> list[str]:
+    """
+    Every text in *window*: in labels (buttons draw theirs in one), entries,
+    text boxes and on canvases.
+    """
+    texts = []
+    for widget in descendants(window):
+        if isinstance(widget, tk.Label):
+            texts.append(label_text(widget))
+        elif isinstance(widget, tk.Entry):
+            texts.append(widget.get())
+        elif isinstance(widget, tk.Text):
+            texts.append(widget.get("1.0", "end-1c"))
+        elif isinstance(widget, tk.Canvas) and not isinstance(widget, ctk.CTkCanvas):
+            texts.extend(
+                item_option(widget, item, "text")
+                for item in widget.find_all()
+                if item_type(widget, item) == "text"
+            )
+    return [text for text in texts if text.strip()]
+
+
 def run_app_script(
     code: str, *args: str, timeout: float = 120
 ) -> subprocess.CompletedProcess[str]:

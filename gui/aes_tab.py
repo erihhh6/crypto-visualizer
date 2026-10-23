@@ -50,10 +50,11 @@ class AESTab(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_controls(self) -> None:
+        # The inputs on top; the output and the actions below. In one row they
+        # did not fit the window's minimum width, and Decrypt was cut off.
         ctrl = ctk.CTkFrame(self)
         ctrl.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 0))
-        for i in range(8):
-            ctrl.grid_columnconfigure(i, weight=1 if i == 0 else 0)
+        ctrl.grid_columnconfigure(1, weight=1)  # spare width goes to the text
 
         # Input text
         ctk.CTkLabel(ctrl, text="Plaintext:").grid(
@@ -69,7 +70,9 @@ class AESTab(ctk.CTkFrame):
         self._input_entry.grid(row=0, column=1, padx=4, pady=6, sticky="ew")
 
         # Key field
-        ctk.CTkLabel(ctrl, text="Key (hex):").grid(row=0, column=2, padx=(8, 2))
+        ctk.CTkLabel(ctrl, text="Key (hex):").grid(
+            row=0, column=2, sticky="w", padx=(8, 2)
+        )
         self._key_var = tk.StringVar()
         self._key_entry = ctk.CTkEntry(
             ctrl,
@@ -78,37 +81,12 @@ class AESTab(ctk.CTkFrame):
             width=200,
             placeholder_text="leave empty → random AES-128",
         )
-        self._key_entry.grid(row=0, column=3, padx=4, pady=6)
+        self._key_entry.grid(row=0, column=3, padx=(4, 8), pady=6, sticky="ew")
 
-        # Mode selector
-        ctk.CTkLabel(ctrl, text="Mode:").grid(row=0, column=4, padx=(8, 2))
-        self._mode_var = tk.StringVar(value=AesMode.ECB)
-        self._mode_menu = ctk.CTkOptionMenu(
-            ctrl,
-            values=[mode.value for mode in AesMode],
-            variable=self._mode_var,
-            width=100,
-        )
-        self._mode_menu.grid(row=0, column=5, padx=4, pady=6)
-
-        # Buttons
-        self._enc_btn = ctk.CTkButton(
-            ctrl,
-            text="Encrypt ▶",
-            command=self._do_encrypt,
-            width=110,
-            fg_color=BUTTON_PRIMARY,
-        )
-        self._enc_btn.grid(row=0, column=6, padx=4, pady=6)
-
-        self._dec_btn = ctk.CTkButton(
-            ctrl,
-            text="◀ Decrypt",
-            command=self._do_decrypt,
-            width=110,
-            fg_color=BUTTON_SECONDARY,
-        )
-        self._dec_btn.grid(row=0, column=7, padx=(4, 8), pady=6)
+        # Enter in either input encrypts, like the Encrypt button.
+        for entry in (self._input_entry, self._key_entry):
+            for key in ("<Return>", "<KP_Enter>"):
+                entry.bind(key, lambda _event: self._do_encrypt())
 
         # Decryption output: its own read-only field, so decrypting never
         # overwrites the plaintext the user typed.
@@ -123,6 +101,38 @@ class AESTab(ctk.CTkFrame):
             width=280,
             state="readonly",
         ).grid(row=1, column=1, padx=4, pady=(0, 6), sticky="ew")
+
+        # Mode selector and buttons, under the key
+        ctk.CTkLabel(ctrl, text="Mode:").grid(row=1, column=2, sticky="w", padx=(8, 2))
+        actions = ctk.CTkFrame(ctrl, fg_color="transparent")
+        actions.grid(row=1, column=3, sticky="w", padx=(4, 8), pady=(0, 6))
+
+        self._mode_var = tk.StringVar(value=AesMode.ECB)
+        self._mode_menu = ctk.CTkOptionMenu(
+            actions,
+            values=[mode.value for mode in AesMode],
+            variable=self._mode_var,
+            width=100,
+        )
+        self._mode_menu.pack(side="left")
+
+        self._enc_btn = ctk.CTkButton(
+            actions,
+            text="Encrypt ▶",
+            command=self._do_encrypt,
+            width=110,
+            fg_color=BUTTON_PRIMARY,
+        )
+        self._enc_btn.pack(side="left", padx=(8, 4))
+
+        self._dec_btn = ctk.CTkButton(
+            actions,
+            text="◀ Decrypt",
+            command=self._do_decrypt,
+            width=110,
+            fg_color=BUTTON_SECONDARY,
+        )
+        self._dec_btn.pack(side="left", padx=(4, 0))
 
     def _build_panels(self) -> None:
         main = ctk.CTkFrame(self, fg_color="transparent")

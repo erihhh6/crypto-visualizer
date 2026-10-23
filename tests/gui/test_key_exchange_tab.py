@@ -219,8 +219,33 @@ def test_dh_shows_the_public_parameters_as_public(tab: Any) -> None:
     find_button(tab, "Run DH").invoke()
 
     first_card = _card_lines(tab)[0]
-    assert any(line.startswith("🔓 p = FFFFFFFFFFFFFFFF") for line in first_card)
-    assert "🔓 g = 2" in first_card
+    assert any(line.startswith("public  p = FFFFFFFFFFFFFFFF") for line in first_card)
+    assert "public  g = 2" in first_card
+
+
+@pytest.mark.parametrize(
+    ("protocol", "who_knows"),
+    [
+        (
+            "Run DH",
+            {"p": "public", "g": "public", "a": "private", "A": "public"}
+            | {"b": "private", "B": "public", "s": "secret", "K": "secret"},
+        ),
+        (
+            "Run ECDH",
+            {"curve": "public", "dA": "private", "QA": "public", "dB": "private"}
+            | {"QB": "public", "S.x": "secret", "K": "secret"},
+        ),
+    ],
+)
+def test_each_value_says_in_words_who_may_know_it(
+    tab: Any, protocol: str, who_knows: dict[str, str]
+) -> None:
+    """Not just by colour: green and red look alike to many colour-blind readers."""
+    find_button(tab, protocol).invoke()
+
+    said = {line.split()[1]: line.split()[0] for line in _value_lines(tab)}
+    assert said == who_knows
 
 
 @pytest.mark.parametrize(
@@ -235,9 +260,9 @@ def test_private_keys_are_never_shown(
     lines = _value_lines(tab)
     named = {line.split(" = ")[0].split()[-1]: line for line in lines}
     for symbol in private_symbols:
-        assert named[symbol].endswith(f"{symbol} = [private]")
+        assert named[symbol].endswith(f"{symbol} = [hidden]")
     assert all(
-        "[private]" not in line for s, line in named.items() if s not in private_symbols
+        "[hidden]" not in line for s, line in named.items() if s not in private_symbols
     )
 
 
@@ -358,7 +383,7 @@ def test_both_protocols_end_with_a_derived_aes_key(tab: Any, protocol: str) -> N
     last_card = _card_lines(tab)[-1]
     assert any("HKDF-SHA256" in line for line in last_card)
     (key_line,) = [line for line in last_card if " K = " in line]
-    assert key_line.startswith("🔒")  # a shared secret: never sent
+    assert key_line.startswith("secret ")  # a shared secret: never sent
 
 
 @pytest.mark.parametrize("protocol", ["Run DH", "Run ECDH"])

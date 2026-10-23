@@ -15,6 +15,7 @@ from collections.abc import Iterable, Sequence
 
 import customtkinter as ctk
 
+from gui.layout import wrap_to_width
 from gui.palette import (
     MODE_COLOURS,
     MUTED,
@@ -156,9 +157,10 @@ class ModeCard(ctk.CTkFrame):
         self._strip.grid(row=1, column=0, columnspan=2, padx=8, sticky="w")
 
         self._info = ctk.CTkLabel(
-            self, text="(no data)", font=("Courier New", 9), anchor="w"
+            self, text="(no data)", font=("Courier New", 9), anchor="w", justify="left"
         )
         self._info.grid(row=2, column=0, columnspan=2, padx=8, pady=(2, 6), sticky="w")
+        wrap_to_width(self._info, margin=16)
 
     def show(self, result: EncryptionResult, *, selected: bool) -> None:
         self._strip.show([blk.ciphertext for blk in result.blocks])

@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 import customtkinter as ctk
 
+from gui.layout import wrap_to_width
 from gui.palette import (
     GREEN,
     MODE_COLOURS,
@@ -101,6 +102,7 @@ class OutcomeCard(ctk.CTkFrame):
             wraplength=230,
         )
         self._verdict.grid(row=1, column=0, sticky="w", padx=8)
+        wrap_to_width(self._verdict, margin=16)
 
         self._received = tk.Text(
             self,
@@ -113,6 +115,8 @@ class OutcomeCard(ctk.CTkFrame):
             cursor="arrow",
         )
         self._received.grid(row=2, column=0, sticky="ew", padx=8, pady=2)
+        # Received bytes wrap anywhere; the dimmed summaries between words.
+        self._received.tag_configure("dim", wrap="word")
         follow_appearance(self._received, self._restyle_received)
 
         self._note = ctk.CTkLabel(
@@ -125,6 +129,7 @@ class OutcomeCard(ctk.CTkFrame):
             wraplength=230,
         )
         self._note.grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
+        wrap_to_width(self._note, margin=16)
 
     def _restyle_received(self) -> None:
         text = self._received
@@ -170,8 +175,13 @@ class TamperTab(ctk.CTkFrame):
     def __init__(self, parent: tk.Widget, **kwargs: object) -> None:
         super().__init__(parent, fg_color="transparent", **kwargs)
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        # The lab is taller than the smallest window: there, it scrolls.
+        self._body = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._body.grid(row=0, column=0, sticky="nsew")
+        self._body.grid_columnconfigure(0, weight=1)
 
-        controls = ctk.CTkFrame(self)
+        controls = ctk.CTkFrame(self._body)
         controls.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
         controls.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(controls, text="Message:").grid(row=0, column=0, padx=(8, 4))
@@ -208,47 +218,57 @@ class TamperTab(ctk.CTkFrame):
         )
         ctk.CTkLabel(edit.header, text="Replace").pack(side="left", padx=(8, 4))
         self._old = tk.StringVar(value="100")
-        ctk.CTkEntry(edit.header, textvariable=self._old, width=80).pack(side="left")
+        old_entry = ctk.CTkEntry(edit.header, textvariable=self._old, width=80)
+        old_entry.pack(side="left")
         ctk.CTkLabel(edit.header, text="with").pack(side="left", padx=4)
         # Every character changes: ECB's garbage then matches the edit by
         # chance once in 16.7 million runs. With "900" (one changed byte) it
         # was once in 256, and ECB sometimes seemed to accept the edit.
         self._new = tk.StringVar(value="999")
-        ctk.CTkEntry(edit.header, textvariable=self._new, width=80).pack(side="left")
+        new_entry = ctk.CTkEntry(edit.header, textvariable=self._new, width=80)
+        new_entry.pack(side="left")
         ctk.CTkButton(
             edit.header, text="Tamper ▶", width=100, command=self._tamper
         ).pack(side="left", padx=8)
+        # Enter in either field makes the edit, like the Tamper button.
+        for entry in (old_entry, new_entry):
+            for key in ("<Return>", "<KP_Enter>"):
+                entry.bind(key, lambda _event: self._tamper())
 
         self._wrong_key_cards = wrong.cards
         self._edit_cards = edit.cards
 
-        ctk.CTkLabel(
-            self,
+        takeaway = ctk.CTkLabel(
+            self._body,
             text=_TAKEAWAY,
             font=ctk.CTkFont(size=12),
             justify="left",
             anchor="w",
             wraplength=900,
-        ).grid(row=3, column=0, sticky="w", padx=14, pady=(8, 6))
+        )
+        takeaway.grid(row=3, column=0, sticky="w", padx=14, pady=(8, 6))
+        wrap_to_width(takeaway, margin=28)
 
     def _section(self, row: int, title: str, hint: str) -> _Section:
-        frame = ctk.CTkFrame(self)
+        frame = ctk.CTkFrame(self._body)
         frame.grid(row=row, column=0, sticky="ew", padx=6, pady=4)
         frame.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="card")
 
         header = ctk.CTkFrame(frame, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=4, sticky="ew", padx=8, pady=(6, 4))
+        header.grid(row=0, column=0, columnspan=4, sticky="ew", padx=8, pady=(6, 0))
         ctk.CTkLabel(header, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(
             side="left", padx=(0, 8)
         )
-        ctk.CTkLabel(header, text=hint, font=("Courier New", 9), text_color=MUTED).pack(
-            side="right"
+        # On a line of its own: beside the controls, it left the Tamper button
+        # no room in a small window.
+        ctk.CTkLabel(frame, text=hint, font=("Courier New", 9), text_color=MUTED).grid(
+            row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 4)
         )
 
         cards = {}
         for col, mode in enumerate(AesMode):
             card = OutcomeCard(frame, mode)
-            card.grid(row=1, column=col, sticky="nsew", padx=4, pady=(0, 6))
+            card.grid(row=2, column=col, sticky="nsew", padx=4, pady=(0, 6))
             cards[mode] = card
         return _Section(header, cards)
 

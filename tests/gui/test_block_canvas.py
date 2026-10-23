@@ -7,6 +7,7 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import Any
 
+import customtkinter as ctk
 import pytest
 
 from gui.block_canvas import MAX_DRAWN_BLOCKS, BlockCanvas
@@ -15,6 +16,7 @@ from modules.aes_modes import AesMode, EncryptionResult, encrypt
 from tests.gui.helpers import (
     block_canvas,
     click_block,
+    descendants,
     item_option,
     item_type,
     plaintext_center,
@@ -231,19 +233,53 @@ def test_long_messages_draw_only_the_first_blocks(root: Any) -> None:
     assert f"{MAX_DRAWN_BLOCKS} of 40 blocks" in item_option(canvas, note, "text")
 
 
-def test_redrawing_scrolls_back_to_the_first_block(root: Any) -> None:
+def _short(root: Any, result: EncryptionResult) -> tuple[BlockCanvas, tk.Canvas]:
+    """A BlockCanvas in a window too low for the four rows of CTR or GCM."""
+    root.geometry("700x120")
     widget = BlockCanvas(root)
     widget.pack(fill="both", expand=True)
-    long_message = encrypt(AesMode.CTR, b"x" * 16 * 40, os.urandom(16))
-    widget.draw(long_message)
+    widget.draw(result)
     pump(root)
     canvas = block_canvas(widget)
+    require(canvas.winfo_height() < canvas.bbox("all")[3], "the diagram fits after all")
+    return widget, canvas
+
+
+def _vertical_scrollbar(widget: BlockCanvas) -> Any:
+    (scrollbar,) = [
+        w
+        for w in descendants(widget)
+        if isinstance(w, ctk.CTkScrollbar) and w.cget("orientation") == "vertical"
+    ]
+    return scrollbar
+
+
+def test_a_diagram_taller_than_the_canvas_scrolls_down_to_the_ciphertext(
+    root: Any,
+) -> None:
+    widget, canvas = _short(root, encrypt(AesMode.GCM, b"A" * 40, os.urandom(16)))
+    scrollbar = _vertical_scrollbar(widget)
+    assert scrollbar.winfo_ismapped()
+    assert scrollbar.get()[1] < 1  # it shows that there is more below
+
+    scrollbar.cget("command")("moveto", 1.0)  # as dragging it to the bottom does
+    pump(root, 50)
+
+    assert canvas.bbox("ciphertext")[3] <= canvas.canvasy(canvas.winfo_height())
+
+
+def test_redrawing_scrolls_back_to_the_first_block(root: Any) -> None:
+    long_message = encrypt(AesMode.CTR, b"x" * 16 * 40, os.urandom(16))
+    widget, canvas = _short(root, long_message)
     canvas.xview_moveto(1.0)
-    require(canvas.xview()[0] > 0, "the canvas did not scroll")
+    canvas.yview_moveto(1.0)
+    require(
+        canvas.xview()[0] > 0 and canvas.yview()[0] > 0, "the canvas did not scroll"
+    )
 
     widget.draw(long_message)
 
-    assert canvas.xview()[0] == 0
+    assert (canvas.xview()[0], canvas.yview()[0]) == (0, 0)
 
 
 def test_deselected_block_gets_its_border_back(canvas: tk.Canvas) -> None:
@@ -336,3 +372,17 @@ def test_a_theme_switch_repaints_the_canvas_and_keeps_the_selection(
         }
         assert headers == {MUTED[colour]}
         assert _border(canvas, 1) == selected  # still selected after the repaint
+
+
+def test_a_theme_switch_keeps_the_scroll_position(
+    root: Any, switch_appearance: Callable[[str], None]
+) -> None:
+    _, canvas = _short(root, encrypt(AesMode.CTR, b"x" * 16 * 40, os.urandom(16)))
+    canvas.xview_moveto(0.5)
+    canvas.yview_moveto(1.0)
+    view = canvas.xview()[0], canvas.yview()[0]
+    require(view[0] > 0 and view[1] > 0, "the canvas did not scroll")
+
+    switch_appearance("Dark")
+
+    assert (canvas.xview()[0], canvas.yview()[0]) == view

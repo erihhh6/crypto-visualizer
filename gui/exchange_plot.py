@@ -54,7 +54,9 @@ class ExchangePlot(ctk.CTkFrame):
 
         # A bare Figure, not pyplot: pyplot attaches its figures to a hidden Tk
         # root of its own, which kept mainloop() running after the window closed.
-        self._figure = Figure(figsize=(5, 4))
+        # A small size to ask for: the plot stretches to fill its column anyway,
+        # and asking for 500 pixels starved the step list in a small window.
+        self._figure = Figure(figsize=(3, 3))
         self._figure.subplots_adjust(left=0.1, right=0.97, top=0.92, bottom=0.27)
         self._ax = self._figure.add_subplot()
         self._footnote = self._figure.text(

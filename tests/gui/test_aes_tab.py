@@ -150,6 +150,27 @@ def test_an_invalid_key_is_explained_instead_of_used(
     no_dialogs.clear()  # the explanation was the expected outcome
 
 
+def _press_enter(tab: Any, entry: Any) -> None:
+    """Press Enter in a CustomTkinter entry, as Tk delivers it: to the focus."""
+    (inner,) = [w for w in descendants(entry) if isinstance(w, tk.Entry)]
+    inner.focus_force()
+    pump(tab, 30)
+    inner.event_generate("<Return>")
+
+
+@pytest.mark.parametrize("field", ["plaintext", "key"])
+def test_enter_in_the_plaintext_or_the_key_encrypts(tab: Any, field: str) -> None:
+    fields = _fields(tab)
+    _choose_mode(tab, AesMode.CBC)
+    _type(fields.plaintext, _MESSAGE)
+    _type(fields.key, _RIGHT_KEY.hex())
+
+    _press_enter(tab, getattr(fields, field))
+
+    click_block(block_canvas(tab), 1)  # the message was encrypted and drawn
+    assert _details(tab).startswith("Block 1 — CBC")
+
+
 def test_an_empty_key_field_gets_a_fresh_aes128_key(tab: Any) -> None:
     fields = _fields(tab)
     _type(fields.key, "")
@@ -312,6 +333,34 @@ def test_loaded_image_fits_inside_the_tab(
         assert height <= tab.winfo_height(), (
             f"{height}px image in a {tab.winfo_height()}px tab"
         )
+
+
+def _views(tab: Any) -> list[tuple[int, int]]:
+    """Each view's height, and the height of the label that has to hold it."""
+    shown = [w for w in descendants(tab) if isinstance(w, tk.Label) and w.cget("image")]
+    require(len(shown) == 3, f"expected original/ECB/CBC images, found {len(shown)}")
+    return [
+        (int(w.tk.call("image", "height", w.cget("image"))), w.master.winfo_height())
+        for w in shown
+    ]
+
+
+def test_the_views_shrink_to_fit_a_small_window_and_grow_back(
+    tab: Any, root: Any
+) -> None:
+    find_button(tab, "Use Sample").invoke()
+    pump(root)
+    full = _views(tab)
+
+    root.geometry("900x450")
+    pump(root, 300)
+    small = _views(tab)
+    root.geometry("1100x700")
+    pump(root, 300)
+
+    assert all(height <= room for height, room in small)
+    assert small[0][0] < full[0][0]
+    assert _views(tab) == full
 
 
 def _size_note(tab: Any) -> str:

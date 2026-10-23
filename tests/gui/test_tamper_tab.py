@@ -82,6 +82,18 @@ def test_only_the_changed_characters_are_highlighted(tab: Any) -> None:
     assert edits[AesMode.GCM].highlighted == []
 
 
+@pytest.mark.parametrize("field", [1, 2], ids=["text to replace", "replacement"])
+def test_enter_in_an_edit_field_tampers(tab: Any, field: int) -> None:
+    (inner,) = [w for w in descendants(_entries(tab)[field]) if isinstance(w, tk.Entry)]
+    inner.focus_force()
+    pump(tab, 30)
+
+    inner.event_generate("<Return>")
+
+    _, edits = _cards(tab)
+    assert edits[AesMode.CTR].verdict == "Undetected: the edit landed exactly"
+
+
 def test_one_wrong_key(tab: Any) -> None:
     find_button(tab, "One wrong key").invoke()
 

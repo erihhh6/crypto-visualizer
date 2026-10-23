@@ -32,6 +32,8 @@ _ICON_PATH = os.path.join(
 ctk.set_appearance_mode("System")
 use_readable_theme()
 
+MIN_SIZE = (900, 600)  # the smallest window in which every control still fits
+
 
 class MainWindow(ctk.CTk):
     """Top-level application window."""
@@ -40,7 +42,7 @@ class MainWindow(ctk.CTk):
         super().__init__()
         self.title("Crypto Visualizer")
         self.geometry("1100x700")
-        self.minsize(900, 600)
+        self.minsize(*MIN_SIZE)
         self.resizable(True, True)
         # Handlers show dialogs for problems the user can fix (a bad key, empty
         # input). Anything else escaping a button or event handler is a bug:
@@ -103,7 +105,6 @@ class MainWindow(ctk.CTk):
         box.grid_columnconfigure(0, weight=1)
         box.grid_rowconfigure(1, weight=1)
 
-        # Tab selector — lives INSIDE the gray box at the top
         # Tab selector — lives INSIDE the gray box at the top
         names = ("AES Modes", "Key Exchange", "Tamper Lab")
         self._tab_selector = ctk.CTkSegmentedButton(
